@@ -1,5 +1,5 @@
 import { memoryAdmit, memoryStats } from '../server/memory.js';
-import { identityAnswer, validateMessages, MODEL_LABEL } from '../server/config.js';
+import { identityAnswer, validateMessages } from '../server/config.js';
 import { originAllowed, parseChatBody, rateLimit, turnstileConfig, verifyTurnstile } from '../server/security.js';
 let busy = false;
 
@@ -32,7 +32,7 @@ export default async function handler(req, res) {
     res.setHeader('Retry-After', '5');
     return res.status(429).json({ error: 'The model is busy. Waiting for capacity.', retryable: true });
   }
-  if (!memoryAdmit(memoryStats(), .9, process.memoryUsage().rss < 400 * 1024 * 1024 ? 700 * 1024 * 1024 : 160 * 1024 * 1024)) {
+  if (!memoryAdmit(memoryStats(), .9, 32 * 1024 * 1024)) {
     res.setHeader('Retry-After', '10');
     return res.status(503).json({ error: 'Server RAM is above the 90% admission threshold.', retryable: true });
   }
@@ -41,7 +41,7 @@ export default async function handler(req, res) {
   const generationWait = rateLimit(req, 'generations');
   if (generationWait) return rejectRate(res, generationWait, 'Message limit reached. Please try again shortly.');
   const identity = identityAnswer(messages.at(-1).content);
-  if (identity) return res.status(200).json({ reply: identity, mode: 'vercel-local', model: MODEL_LABEL });
+  if (identity) return res.status(200).json({ reply: identity, mode: 'vercel-local', model: 'AXON AI' });
 
   // Exact arithmetic is solved locally instead of relying on language-model guesses.
   const {simpleArithmetic}=await import('../server/arithmetic.js');
@@ -64,14 +64,15 @@ export default async function handler(req, res) {
       try{const reply=await hostedGenerate(messages);return res.status(200).json({reply,mode:'pretrained',model:'AXON AI'});}
       catch(error){console.error('Hosted chat unavailable; using local model:',error.message)}
     }
-    const { generate } = await import('../server/model.js');
-    const reply = await generate(messages);
-    return res.status(200).json({ reply, mode: 'pretrained-local', model: MODEL_LABEL });
+    // Vercel AI Gateway handles inference without downloading a 786 MB model.
+    const { gatewayGenerate } = await import('../server/gateway.js');
+    const reply = await gatewayGenerate(messages,req);
+    return res.status(200).json({ reply, mode: 'pretrained-hosted', model: 'AXON AI' });
   } catch (error) {
     console.error('AXONAI model error:', error);
     const tooLong = error.message?.startsWith('Your message is too long');
     return res.status(tooLong ? 400 : 503).json({
-      error: tooLong ? error.message : 'The model could not generate a reply. Please try again later.'
+      error: tooLong ? error.message : 'Chat is temporarily unavailable. Please try again shortly.'
     });
   } finally { busy = false; }
 }

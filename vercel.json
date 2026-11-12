@@ -4,8 +4,7 @@
   "outputDirectory": "public",
   "functions": {
     "api/chat.js": {
-      "maxDuration": 300,
-      "excludeFiles": "{test/**,node_modules/onnxruntime-node/bin/napi-v3/{darwin,win32}/**,node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/**,node_modules/onnxruntime-node/bin/napi-v3/linux/x64/*cuda*,node_modules/onnxruntime-node/bin/napi-v3/linux/x64/*tensorrt*}"
+      "maxDuration": 300
     }
   },
   "rewrites": [

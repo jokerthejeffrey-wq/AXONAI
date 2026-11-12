@@ -78,9 +78,10 @@ document.getElementById('composer').onsubmit = async e => {
     statusEl.textContent = '';
   } catch (error) {
     userBubble?.remove();
+    if (!messages.length) document.getElementById('welcome').hidden = false;
     prompt.value = text;
     resize();
-    statusEl.textContent = error.message + ' Your message is ready to retry.';
+    statusEl.textContent = error.message;
   } finally {
     window.axonSecurityReset();
     busy = false;
