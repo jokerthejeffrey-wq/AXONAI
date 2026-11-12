@@ -3,51 +3,44 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AXONAI — Training workers</title>
+  <title>Download — AXON AI</title>
   <link rel="stylesheet" href="/static/theme.css">
   <script src="/static/theme.js" defer></script>
   <style>
-    body{font:15px/1.7 Arial,sans-serif;margin:0}
-    main{max-width:800px;margin:56px auto;padding:24px}
+    body{font:15px/1.6 Arial,Helvetica,sans-serif;margin:0}
+    main{max-width:880px;margin:52px auto;padding:24px}
     a{color:inherit}
-    h1{font-size:42px;font-weight:400;letter-spacing:-1.8px;margin:24px 0 12px}
-    h2{font-size:23px;font-weight:400;margin:0}
-    p{color:var(--muted);margin:8px 0}
-    .intro{margin-bottom:30px}
+    .back{font-size:13px;text-decoration:none;color:var(--muted)}
+    .back:hover{text-decoration:underline}
+    h1{font-size:clamp(34px,5vw,46px);font-weight:400;letter-spacing:-2px;margin:36px 0 32px}
     .items{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))}
-    .item{border:1px solid var(--border);padding:22px;border-radius:14px;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
-    .label{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
-    .dl{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:var(--fg,white);color:var(--bg,black);border-radius:999px;padding:10px 22px;margin-top:18px;font-weight:600;min-height:42px;box-sizing:border-box}
-    .dl:hover{opacity:.8}
-    .foot{margin-top:30px;border-top:1px solid var(--border);padding-top:20px}
-    .foot h2{font-size:20px;margin-bottom:8px}
-    .muted{color:var(--muted)}
+    .item{border:1px solid var(--border);padding:26px;border-radius:14px;display:flex;flex-direction:column;align-items:flex-start;min-height:245px}
+    .label{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+    h2{font-size:27px;font-weight:400;letter-spacing:-.7px;margin:13px 0 3px}
+    .description{color:var(--muted);font-size:14px;margin:0}
+    .dl{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:var(--fg,#fff);color:var(--bg,#111);border-radius:999px;padding:12px 22px;margin-top:auto;font-weight:600;font-size:14px;min-height:44px;box-sizing:border-box}
+    .dl:hover{opacity:.82}
+    .note{color:var(--muted);font-size:12px;margin-top:25px;line-height:1.7}
+    @media(max-width:600px){main{margin:20px auto;padding:20px}.item{min-height:220px}}
   </style>
 </head>
 <body>
   <main>
-    <a href="/">← AXONAI</a>
-    <h1>Training workers</h1>
-    <p class="intro">Download the Windows training application for your hardware.</p>
+    <a class="back" href="/">← AXON AI</a>
+    <h1>Download a trainer</h1>
     <div class="items">
       <section class="item" id="cpu">
-        <div class="label">CPU · Windows x64</div>
-        <h2>CPU-AXON.exe</h2>
-        <p>CPU-only training. Uses NumPy; does not install PyTorch or require a graphics card. Checks RAM usage before training jobs.</p>
-        <a class="dl" href="/downloads/CPU-AXON.exe" download="CPU-AXON.exe">Download CPU-AXON.exe ↓</a>
+        <div class="label">Windows 64-bit</div>
+        <h2>CPU</h2>
+        <p class="description">For any standard PC.</p>
+        <a class="dl" href="/downloads/CPU-AXON.exe" download="CPU-AXON.exe" aria-label="Download CPU trainer">Download CPU ↓</a>
       </section>
       <section class="item" id="gpu">
-        <div class="label">NVIDIA GPU · Windows x64</div>
-        <h2>GPU-AXON.exe</h2>
-        <p>CUDA-accelerated training for compatible NVIDIA hardware. Downloads required GPU dependencies during initial setup.</p>
-        <a class="dl" href="/downloads/GPU-AXON.exe" download="GPU-AXON.exe">Download GPU-AXON.exe ↓</a>
+        <div class="label">Windows 64-bit</div>
+        <h2>GPU</h2>
+        <p class="description">For NVIDIA graphics cards.</p>
+        <a class="dl" href="/downloads/GPU-AXON.exe" download="GPU-AXON.exe" aria-label="Download GPU trainer">Download GPU ↓</a>
       </section>
-    </div>
-    <div class="foot">
-      <h2>Getting started</h2>
-      <p>Run the downloaded file on Windows. The first launch requires an internet connection to install the Python runtime and packages. Enter the HTTPS training coordinator address when prompted.</p>
-      <p>The training coordinator is a separate service; the AXONAI chat website is not the coordinator. Training begins only after you start the worker. The 90% RAM threshold is a best-effort admission limit, not a hard cap.</p>
-      <p><a href="/downloads/SHA256SUMS.txt">SHA-256 checksums</a> · <a href="/docs">Documentation</a></p>
     </div>
   </main>
 </body>

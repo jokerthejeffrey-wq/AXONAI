@@ -7,7 +7,7 @@ export async function getGenerator(){
   loading=(async()=>{
    const {pipeline,env}=await import('@huggingface/transformers');
    // The deployment is read-only. Only the server's temporary cache is writable.
-   env.cacheDir=path.join(process.env.AXON_CACHE_DIR||os.tmpdir(),'axon-smollm2');
+   env.cacheDir=path.join(process.env.AXON_CACHE_DIR||os.tmpdir(),'axon-qwen-0.5b');
    env.allowLocalModels=false;
    return pipeline('text-generation',MODEL_ID,{
     revision:MODEL_REVISION,dtype:'q4',device:'cpu',
@@ -30,7 +30,7 @@ export async function generate(messages){
   else throw Error('Your message is too long for this small model. Please shorten it.');
  }
  const output=await generator(context,{
-  max_new_tokens:128,do_sample:true,temperature:.65,top_p:.9,repetition_penalty:1.1,
+  max_new_tokens:192,do_sample:true,temperature:.45,top_p:.85,repetition_penalty:1.08,
  });
  const generated=output[0]?.generated_text;
  const reply=Array.isArray(generated)?generated.at(-1)?.content:generated;

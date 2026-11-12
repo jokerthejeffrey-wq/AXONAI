@@ -43,15 +43,30 @@ export default async function handler(req, res) {
   const identity = identityAnswer(messages.at(-1).content);
   if (identity) return res.status(200).json({ reply: identity, mode: 'vercel-local', model: MODEL_LABEL });
 
+  // Exact arithmetic is solved locally instead of relying on language-model guesses.
+  const {simpleArithmetic}=await import('../server/arithmetic.js');
+  const calculated=simpleArithmetic(messages.at(-1).content);
+  if(calculated!==null)return res.status(200).json({reply:calculated,mode:'calculation',model:'AXON AI'});
   if (busy) {
     res.setHeader('Retry-After', '5');
     return res.status(429).json({ error: 'The model is busy. Please retry with fresh verification.' });
   }
   busy = true;
   try {
+    // Never promote the student on the frontend alone. The coordinator must
+    // attest to a passing score for an approved checkpoint and serve it itself.
+    const {getQuality,inferFromStudent}=await import('../server/coordinator.js');
+    const quality=await getQuality();
+    const studentReply=await inferFromStudent(messages,quality);
+    if(studentReply)return res.status(200).json({reply:studentReply,mode:'student',model:'AXON AI student',version:quality.version});
+    const {hostedGenerate,hasHosted}=await import('../server/hosted.js');
+    if(hasHosted()){
+      try{const reply=await hostedGenerate(messages);return res.status(200).json({reply,mode:'pretrained',model:'AXON AI'});}
+      catch(error){console.error('Hosted chat unavailable; using local model:',error.message)}
+    }
     const { generate } = await import('../server/model.js');
     const reply = await generate(messages);
-    return res.status(200).json({ reply, mode: 'vercel-local', model: MODEL_LABEL });
+    return res.status(200).json({ reply, mode: 'pretrained-local', model: MODEL_LABEL });
   } catch (error) {
     console.error('AXONAI model error:', error);
     const tooLong = error.message?.startsWith('Your message is too long');

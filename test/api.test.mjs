@@ -6,7 +6,7 @@ import {validateMessages,identityAnswer} from '../server/config.js';
 function response(){return {code:200,headers:{},body:null,setHeader(k,v){this.headers[k]=v;return this},status(n){this.code=n;return this},json(x){this.body=x;return this}}}
 test('Creator attribution credits community and discloses pretrained help',()=>{
  for(const q of ['Who created you?','who did create you','Who made you?']){
-  const a=identityAnswer(q);assert.match(a,/community/);assert.match(a,/SmolLM2/);assert.doesNotMatch(a,/Anthropic/);
+  const a=identityAnswer(q);assert.match(a,/community/);assert.match(a,/pretrained/);assert.doesNotMatch(a,/Anthropic/);
  }
 });
 test('Conversation validation rejects malformed roles and oversized input',()=>{
@@ -23,6 +23,6 @@ test('Method and JSON errors are useful JSON responses',async()=>{
  let res=response();await chat({method:'GET',headers:{}},res);assert.equal(res.code,405);
  res=response();await chat({method:'POST',headers:{},body:'broken json'},res);assert.equal(res.code,400);assert.ok(res.body.error);
 });
-test('Status truthfully reports cloud chat and unconfigured training',()=>{
- const res=response();status({method:'GET'},res);assert.equal(res.body.hosting,'vercel');assert.equal(res.body.training_available,false);
+test('Status truthfully reports cloud chat and unconfigured training',async()=>{
+ const res=response();await status({method:'GET'},res);assert.equal(res.body.hosting,'vercel');assert.equal(res.body.training_available,false);
 });

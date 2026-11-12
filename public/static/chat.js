@@ -53,7 +53,7 @@ document.getElementById('composer').onsubmit = async e => {
     userBubble = bubble('user', text);
     prompt.value = '';
     resize();
-    statusEl.textContent = 'Generating on Vercel… Initial model loading may take a few minutes.';
+    statusEl.textContent = 'Generating answer..';
     const outgoing = [...messages.slice(-12), { role: 'user', content: text }];
     let data;
     for (let attempt = 0; attempt < 30; attempt++) {
@@ -89,6 +89,6 @@ document.getElementById('composer').onsubmit = async e => {
     prompt.focus();
   }
 };
-function showChatMode() { document.getElementById('chat-mode').textContent = '/ SmolLM2 · Vercel'; }
+function showChatMode() { document.getElementById('chat-mode').textContent = ''; }
 axonFetch('/api/status').then(r => { if (!r.ok) throw Error(); return r.json(); })
-  .then(showChatMode).catch(() => { document.getElementById('chat-mode').textContent = '/ offline'; });
+  .then(showChatMode).catch(() => { document.getElementById('chat-mode').textContent = ''; });

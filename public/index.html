@@ -136,7 +136,7 @@ html{scroll-padding-top:90px}body{font-family:Arial,Helvetica,sans-serif}h1,h2,h
 <header>
   <div class="wrap">
     <nav>
-      <div class="logo"><svg class="axon-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 27 15.5 5h1L28 27M9.5 17h13" stroke="currentColor" stroke-width="2.2" stroke-linecap="square"/><path d="m12 25 4-7 4 7-4 3z" fill="currentColor"/></svg>AXONAI</div>
+      <div class="logo"><svg class="axon-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 27 15.5 5h1L28 27M9.5 17h13" stroke="currentColor" stroke-width="2.2" stroke-linecap="square"/><path d="m12 25 4-7 4 7-4 3z" fill="currentColor"/></svg>AXON AI</div>
       <div class="navlinks">
         <a href="#overview">Overview</a>
         <a href="#train">Train</a>
@@ -163,38 +163,32 @@ html{scroll-padding-top:90px}body{font-family:Arial,Helvetica,sans-serif}h1,h2,h
   </div>
 </section>
 
-<div class="strip"><div class="wrap"><div class="stripgrid">
-<div class="stat"><div class="n">135M</div><div class="l">pretrained assistant parameters</div></div>
-<div class="stat"><div class="n" id="version">Vercel</div><div class="l">cloud inference host</div></div>
-<div class="stat"><div class="n" id="pending">Off</div><div class="l">shared training coordinator</div></div>
-<div class="stat"><div class="n" id="accepted">—</div><div class="l">student checkpoint not connected</div></div>
-</div></div></div>
 <section class="train" id="train">
   <div class="wrap">
     <div class="section-head">
       <div class="kicker">Run a node</div>
       <h2>Point your idle hardware at the grid</h2>
-      <p>The independent AXONAI student learns through separate Windows CPU/GPU training workers connected to a persistent coordinator. Chat remains hosted on Vercel.</p>
+      <p>Choose a trainer for your computer and contribute when you want.</p>
     </div>
 
     <div class="traincols">
       <div class="traincard">
         <svg class="hardware-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor"><rect x="6" y="6" width="20" height="20"/><rect x="11" y="11" width="10" height="10"/><path d="M11 1V6M21 1V6M11 26V31M21 26V31M1 11H6M1 21H6M26 11H31M26 21H31"/></svg><h3>Train with a GPU</h3>
-        <p>Train the independent student with an NVIDIA GPU. Download GPU-AXON.exe for Windows to train with a compatible NVIDIA graphics card.</p>
+        <p>For compatible NVIDIA graphics cards.</p>
         <div class="specs">
           <div><span>Compute type</span><b>Parallel / GPU</b></div>
-          <div><span>Session</span><b>8 new lessons per job · Ctrl+C to stop</b></div>
-          <div><span>Availability</span><b>Compiled Windows app</b></div>
+          <div><span>Session</span><b>Start and stop anytime</b></div>
+          <div><span>Availability</span><b>Windows 64-bit</b></div>
         </div>
         <a class="btn small" href="/downloads#gpu"><span>Get GPU-AXON.exe ↗</span></a>
       </div>
       <div class="traincard">
         <svg class="hardware-icon" viewBox="0 0 32 32" fill="none" stroke="currentColor"><rect x="6" y="6" width="20" height="20"/><rect x="11" y="11" width="10" height="10"/><path d="M11 1V6M21 1V6M11 26V31M21 26V31M1 11H6M1 21H6M26 11H31M26 21H31"/></svg><h3>Train with CPU only</h3>
-        <p>No dedicated graphics card required. Download CPU-AXON.exe for Windows to train without a dedicated graphics card or PyTorch.</p>
+        <p>For standard Windows PCs. No graphics card needed.</p>
         <div class="specs">
           <div><span>Compute type</span><b>General / CPU</b></div>
-          <div><span>Session</span><b>8 new lessons per job · Ctrl+C to stop</b></div>
-          <div><span>Availability</span><b>Compiled Windows app</b></div>
+          <div><span>Session</span><b>Start and stop anytime</b></div>
+          <div><span>Availability</span><b>Windows 64-bit</b></div>
         </div>
         <a class="btn small" href="/downloads#cpu"><span>Get CPU-AXON.exe ↗</span></a>
       </div>
@@ -209,11 +203,25 @@ html{scroll-padding-top:90px}body{font-family:Arial,Helvetica,sans-serif}h1,h2,h
   </div>
 </section>
 
-<section id="progress"><div class="wrap"><div class="section-head"><div class="kicker">Where the model stands</div><h2>Every contribution has a next step.</h2><p>Chat runs a small pretrained model directly on Vercel. Independent student training uses a separate persistent coordinator and a reviewed-weight pipeline.</p></div><div class="feed"><div class="feeditem"><small>01 / FOUNDATION</small><strong>Cloud-hosted assistance.</strong><p>SmolLM2 135M, quantized for CPU inference.</p></div><div class="feeditem"><small>02 / CONTRIBUTIONS</small><strong id="training-status">External coordinator required</strong><p>Trainer workloads use separate durable infrastructure, not temporary Vercel function storage.</p></div><div class="feeditem"><small>03 / YOUR CONTROL</small><strong>Start when you choose.</strong><p>Training runs only after the contributor starts the Windows worker and agrees to compute use. Visiting this page does not start it.</p></div></div><div class="cta"><h3>Make your compute count.</h3><a class="btn" href="/docs"><span>Read the setup guide ↗</span></a></div></div></section>
+<section id="progress"><div class="wrap"><div class="section-head"><div class="kicker">AXON AI / progress</div><h2>How far has AXON AI learned?</h2></div>
+<div class="progress-wrap" aria-live="polite">
+  <div class="ringbox" role="img" aria-label="Training evaluation progress">
+    <svg viewBox="0 0 300 300" aria-hidden="true"><circle class="bgring" cx="150" cy="150" r="117" stroke-width="9"/><circle id="axon-ring" class="fg" cx="150" cy="150" r="117" stroke-width="9" stroke-dasharray="735.133" stroke-dashoffset="735.133" stroke-linecap="round"/></svg>
+    <div class="ringmid"><strong class="pct" id="axon-score">—</strong><span class="lbl">AXON AI test score</span></div>
+  </div>
+  <div class="compare">
+    <div class="comparetitle"><span>MODEL COMPARISON</span><span id="axon-version">UNTESTED</span></div>
+    <div class="crow us"><span class="nm">AXON AI</span><span class="track"><span class="fill" id="axon-fill" style="width:0%"></span></span><span class="val" id="axon-value">—</span></div>
+    <div class="crow"><span class="nm">Ready target</span><span class="track"><span class="fill" style="width:85%"></span></span><span class="val">85%</span></div>
+    <div class="scale-note" id="axon-explanation">No test results yet.</div>
+    <div class="checkpoint"><span>CHAT MODEL</span><b id="axon-chat-mode">Assisted mode</b></div>
+  </div>
+</div>
+<div class="feed"><div class="feeditem"><small>01 / FOUNDATION</small><strong>Cloud-hosted assistance.</strong><p>Try AXON AI in your browser.</p></div><div class="feeditem"><small>02 / CONTRIBUTIONS</small><strong id="training-status">Not connected</strong><p>A training server is needed to connect workers.</p></div><div class="feeditem"><small>03 / YOUR CONTROL</small><strong>Start when you choose.</strong><p>You decide when to train.</p></div></div><div class="cta"><h3>Make your compute count.</h3><a class="btn" href="/docs"><span>Read the setup guide ↗</span></a></div></div></section>
 <footer id="docs">
   <div class="wrap">
     <div class="footrow">
-      <div class="logo"><svg class="axon-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 27 15.5 5h1L28 27M9.5 17h13" stroke="currentColor" stroke-width="2.2" stroke-linecap="square"/><path d="m12 25 4-7 4 7-4 3z" fill="currentColor"/></svg>AXONAI</div>
+      <div class="logo"><svg class="axon-mark" viewBox="0 0 32 32" fill="none" aria-hidden="true"><path d="M4 27 15.5 5h1L28 27M9.5 17h13" stroke="currentColor" stroke-width="2.2" stroke-linecap="square"/><path d="m12 25 4-7 4 7-4 3z" fill="currentColor"/></svg>AXON AI</div>
       <div class="footlinks">
         <a href="#overview">Overview</a>
         <a href="#train">Train</a>
@@ -222,7 +230,7 @@ html{scroll-padding-top:90px}body{font-family:Arial,Helvetica,sans-serif}h1,h2,h
         
       </div>
     </div>
-    <div class="footnote">AXONAI from-scratch student · Community-developed AI · Pretrained assistance while the independent student learns.</div>
+    <div class="footnote">AXON AI · Built with its community.</div>
   </div>
 </footer>
 

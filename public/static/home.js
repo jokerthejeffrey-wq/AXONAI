@@ -1,6 +1,19 @@
 const cells=document.getElementById('cells');for(let i=0;i<216;i++){const c=document.createElement('i');if(i*7%37<3)c.className='lit';cells.append(c)}
-async function status(){try{const r=await axonFetch('/api/status');if(!r.ok)throw Error();document.getElementById('training-status').textContent='Chat on Vercel · training external'}catch(e){document.getElementById('training-status').textContent='Chat API unavailable · training external'}}
-status();setInterval(status,30000);
+async function status(){
+ try{const r=await axonFetch('/api/status');if(!r.ok)throw Error();const data=await r.json();
+  const q=data.quality;const ready=Boolean(q?.ready);
+  document.getElementById('training-status').textContent=q?.tested?`Checkpoint v${q.version} evaluated`:'Not connected';
+  const score=typeof q?.score==='number'&&q.tested?Math.max(0,Math.min(100,q.score)):null;
+  document.getElementById('axon-score').textContent=score===null?'—':score+'%';
+  document.getElementById('axon-value').textContent=score===null?'—':score+'%';
+  document.getElementById('axon-ring').style.strokeDashoffset=String(735.133*(1-(score??0)/100));
+  document.getElementById('axon-fill').style.width=(score??0)+'%';
+  document.getElementById('axon-version').textContent=q?.tested?'VERSION '+q.version:'NOT EVALUATED';
+  document.getElementById('axon-chat-mode').textContent=ready?'AXON AI student':'Assisted mode';
+  document.getElementById('axon-explanation').textContent=!q?.tested?'No test results yet.':ready?'AXON AI is ready.':`${q.passed}/${q.total} tests passed.`;
+ }catch(e){document.getElementById('training-status').textContent='Not connected';}
+}
+status();setInterval(status,60000);
 
 // Restored from the original AXONAI landing page.
 let effectsOn=!matchMedia("(prefers-reduced-motion: reduce)").matches;
