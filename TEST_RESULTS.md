@@ -1,8 +1,8 @@
-# Local verification
+# AXON AI · local verification
 
-- `node --test test/*.test.mjs`: 29 passing tests using local **test-only stubs** for Neon and Vercel Blob (no cloud access).
-- `node scripts/build.mjs`: success.
-- Both CPU-AXON.exe and GPU-AXON.exe cross-compiled as Windows x64 console binaries.
-- Embedded Python loader smoke tests: CPU and GPU passed.
-- Full CPU session against **simulated** website API: downloaded 6 model chunks, trained a real lesson, uploaded 6 chunks and finalized a valid SHA-256 manifest.
-- **Not verified:** Vercel deployment, real Neon/Blob connections, EXE execution on Windows, GPU training, multi-user production concurrency.
+- Rebuilt both Windows x64 console EXEs, now defaulting to https://axonai-theta.vercel.app.
+- `npm run build`: passed.
+- `npm test`: 32/32 local tests passed using temporary test-only stubs for Neon Postgres and Vercel Blob. No external services were accessed.
+- Gateway unit tests include the AI SDK call shape, automatic OIDC eligibility, missing local auth, and structured error codes.
+- Checked updated server JavaScript with `node --check`.
+- This environment could not install real AI SDK dependencies or test a live AI Gateway/Neon/Blob connection. Vercel deployment, billing, and actual Windows runtime remain unverified.

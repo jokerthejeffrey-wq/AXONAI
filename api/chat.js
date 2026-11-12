@@ -51,8 +51,8 @@ export default async function handler(req,res) {
     const code=error instanceof GatewayError ? error.code : 'unknown';
     // Only log a status category. Never include private tokens or raw prompts.
     console.error('AXON AI chat backend:',code);
-    if (code==='auth_missing' || code==='auth_rejected') return res.status(503).json({
-      error:'Chat service is not connected. The site owner must enable AI Gateway in Vercel.',code
+    if (code==='auth_missing' || code==='auth_rejected' || code==='access_denied') return res.status(503).json({
+      error:'Chat is temporarily unavailable. Please try again later.',code
     });
     if (code==='billing') return res.status(503).json({
       error:'Chat credits are unavailable. The site owner must check AI Gateway billing.',code

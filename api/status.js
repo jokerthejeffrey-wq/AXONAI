@@ -12,6 +12,7 @@ export default async function handler(req,res) {
     chat_mode:quality?.ready?'student-eligible':'pretrained',
     // This checks that credentials are present, not that billing or the provider is healthy.
     chat_credentials_present:Boolean(gatewayToken(req)),
+    chat_auth_method: process.env.AI_GATEWAY_API_KEY ? 'api-key' : (process.env.VERCEL ? 'vercel-oidc' : (process.env.VERCEL_OIDC_TOKEN ? 'oidc' : 'none')), 
     local_model_installed:false,
     training_available:Boolean(training.training_available),
     training_progress:training.reserved_lessons??0,

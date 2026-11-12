@@ -1,8 +1,13 @@
-AXON AI: one Vercel project, no separate coordinator.
-Upload AXONAI_Vercel to your GitHub repository root.
-Vercel Project > Settings > Root Directory: AXONAI_Vercel
-Build: npm run build   Output: public   Install: npm install   Node: 22.x
-Connect Neon Postgres + PUBLIC Vercel Blob store, add AXON_OWNER_TOKEN as a secret.
-Check https://YOUR-WEBSITE/api/status (training_available must be true).
-Edit AXONAI_Vercel/public/worker-config.json with your website production URL, commit and redeploy.
-See README.md for complete setup and review instructions.
+AXON AI · axonai-theta.vercel.app
+
+Upload the contents of AXONAI_Vercel (not the containing directory) to a folder that is the Vercel Root Directory.
+Set Framework Preset: Other; Node.js: 22.x. Build command: npm run build. Output Directory: public.
+
+Chat: This release uses the official Vercel AI SDK, with automatic OIDC authentication on Vercel if AI Gateway is enabled for the project. No key is bundled.
+In Vercel, enable AI Gateway for the correct project/team. If necessary create a real AI Gateway API Key and add AI_GATEWAY_API_KEY to Production environment variables, then redeploy. Do not paste a random/generated key.
+AI Gateway models may require billing/credits. Check /api/status for chat_auth_method; it is configuration information, not a guarantee of provider health.
+
+Windows training clients are pinned to https://axonai-theta.vercel.app and use the website's /api/* training routes.
+Training requires a connected Neon Postgres database and Vercel Blob store for persistent storage. The site can show training unavailable until both services are connected.
+
+This package does not create Vercel credentials and cannot activate services in your account.

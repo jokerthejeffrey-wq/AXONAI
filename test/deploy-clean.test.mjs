@@ -32,7 +32,7 @@ test('Chat missing gateway credentials returns actionable error without pretendi
    await chat({method:'POST',headers:{},body:{messages:[{role:'user',content:'hello again'}]}},res);
    assert.equal(res.code,503);
    assert.equal(res.body.code,'auth_missing');
-   assert.match(res.body.error,/enable AI Gateway/);
+   assert.match(res.body.error,/temporarily unavailable/);
    assert.equal(res.body.reply,undefined);
  }finally{
    if(old===undefined)delete process.env.AI_GATEWAY_API_KEY;else process.env.AI_GATEWAY_API_KEY=old;

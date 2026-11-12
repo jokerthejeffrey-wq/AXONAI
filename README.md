@@ -10,9 +10,9 @@ You do **not** deploy or keep a separate coordinator, Ubuntu server, or home PC 
 2. In Vercel, set **Root Directory = `AXONAI_Vercel`**, Framework Preset **Other**, Node.js **22.x**. Delete any legacy custom **Install Command** (do not use `npm ci` with this version); let it use `npm install`. Build command `npm run build`, Output Directory `public`.
 3. Deploy. In **Vercel → Storage / Marketplace**, add **Neon Postgres** to the project, which supplies `DATABASE_URL`. You do not have to write SQL manually; API creates its tables.
 4. In **Vercel → Storage**, create a **public Vercel Blob** store and connect it to the project, with the `BLOB_READ_WRITE_TOKEN` variable. This stores uploaded checkpoint pieces.
-5. In Vercel → Settings → Environment Variables, create a random `AXON_OWNER_TOKEN` (64 hex digits) for reviewing updates. Do not put it on the website or in GitHub. For AI chat also enable **AI Gateway** and its required authentication/credits.
+5. In Vercel → Settings → Environment Variables, create a random `AXON_OWNER_TOKEN` (64 hex digits) for reviewing updates. Do not put it on the website or in GitHub. Enable **AI Gateway** for the Vercel project. This site uses the official AI SDK, so deployed functions normally authenticate automatically with Vercel OIDC; a genuine `AI_GATEWAY_API_KEY` is an optional alternative. AI Gateway requires available credits/billing. Never use a random AXON app secret as an AI Gateway key.
 6. Redeploy after connecting storage. Open `https://YOUR-WEBSITE/api/status` and confirm `"training_available":true`.
-7. Edit `AXONAI_Vercel/public/worker-config.json` to `{"website_url":"https://YOUR-WEBSITE.vercel.app"}` and commit. The compiled CPU and GPU EXEs automatically read this public config from your GitHub repository when launched. This is **owner-only, once**. Do not enter a separate coordinator URL or tokens on volunteers' PCs.
+7. The trainers are already configured for `https://axonai-theta.vercel.app`. No URL needs to be entered by volunteers. Only recompile the EXEs if you change the site's address.
 
 Volunteer experience: download `CPU-AXON.exe` or `GPU-AXON.exe`, open it, and it automatically connects to the AXON AI WEBSITE. It installs its own required runtime on first launch and starts training until closed. CPU uses NumPy without PyTorch; GPU requires NVIDIA/CUDA. Both have a conservative 90% RAM threshold.
 
@@ -40,3 +40,8 @@ Vercel Functions are short-lived: there is no always-running training process or
 The starting student is a small randomly initialized model trained from scratch, not a conversational model. Progress counts lessons assigned, not a GPT-3-equivalent intelligence score. Nothing here guarantees that it will become conversational merely from repeated simple lessons.
 
 The supplied EXEs were compiled for Windows x64 here and the CPU protocol was tested against a simulated website endpoint. **The live Vercel + Neon + Blob integration, actual Windows execution, and GPU training were not tested in this environment.** The executables contain Python bytecode and can be reverse-engineered.
+
+### Troubleshooting chat
+
+If chat returns a service error, first check `https://axonai-theta.vercel.app/api/status` and your Vercel Function logs. Enable AI Gateway for the correct project/team and verify its credits. If you configured a random string for `AI_GATEWAY_API_KEY`, remove it or replace it with a genuine key from Vercel AI Gateway, then redeploy. The server uses automatic OIDC when Vercel provides it, so a manual key is normally unnecessary. The ZIP does **not** contain an API key or create Vercel authentication on your behalf.
+
