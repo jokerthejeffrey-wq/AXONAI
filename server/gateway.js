@@ -1,53 +1,91 @@
-// Hosted inference: no large model downloads in ephemeral Vercel functions.
-// The token is only used server-side and is never returned to browsers.
+// The chatbot is hosted through Vercel AI Gateway. No model weights are
+// installed, downloaded, or persisted inside Vercel Functions.
+const GATEWAY_URL = 'https://ai-gateway.vercel.sh/v1/chat/completions';
+const DEFAULT_MODEL = 'openai/gpt-4.1-mini';
+
 export class GatewayError extends Error {
-  constructor(message, status=503) { super(message); this.name='GatewayError'; this.status=status; }
+  constructor(message, code='upstream', status=503, retryable=false) {
+    super(message);
+    this.name = 'GatewayError';
+    this.code = code;
+    this.status = status;
+    this.retryable = retryable;
+  }
 }
 
-export function gatewayToken(req,env=process.env){
-  const staticKey = env.AI_GATEWAY_API_KEY?.trim();
-  if(staticKey) return staticKey;
-  const oidc = env.VERCEL_OIDC_TOKEN?.trim();
-  if(oidc) return oidc;
-  // Vercel's runtime can inject OIDC on the server-side Request headers.
-  if(env.VERCEL){
-    const raw=req?.headers?.['x-vercel-oidc-token'];
-    if(typeof raw==='string'&&raw.length>20)return raw.trim();
+export function gatewayToken(req, env=process.env) {
+  const apiKey = typeof env.AI_GATEWAY_API_KEY === 'string' ? env.AI_GATEWAY_API_KEY.trim() : '';
+  if (apiKey) return apiKey;
+  const oidc = typeof env.VERCEL_OIDC_TOKEN === 'string' ? env.VERCEL_OIDC_TOKEN.trim() : '';
+  if (oidc) return oidc;
+  // Vercel Functions can receive a provisioned OIDC token in this header.
+  // Only accept this header when running on Vercel, not from local callers.
+  if (env.VERCEL) {
+    const header = req?.headers?.['x-vercel-oidc-token'];
+    if (typeof header === 'string' && header.length > 20) return header.trim();
   }
   return null;
 }
 
-export async function gatewayGenerate(messages, req, {fetcher=fetch,env=process.env}={}){
-  const token=gatewayToken(req,env);
-  if(!token) throw new GatewayError('Vercel AI Gateway authentication is not configured.',503);
-  const chosen=env.AXON_GATEWAY_MODEL||'openai/gpt-4.1-mini';
-  // Allow the owner to choose another model via an environment variable.
-  // Never accept a model ID from an untrusted browser request.
-  if(!/^[a-z0-9-]+\/[a-zA-Z0-9._:-]+$/.test(chosen))throw new GatewayError('Invalid model configuration.');
-  let r;
-  try{
-    r=await fetcher('https://ai-gateway.vercel.sh/v1/chat/completions', {
-      method:'POST',
-      headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:chosen,
-        messages:[{role:'system',content:'You are AXON AI, a community AI assistant. Answer clearly, accurately, and concisely. You are pretrained assistance while a separate community-built student model is in training. Do not pretend you were trained from scratch by AXON AI. If unsure, say so.'},...messages.slice(-11)],
-        max_tokens:450,temperature:0.35,stream:false,
-      }),
-      signal:AbortSignal.timeout(45000)
-    });
-  }catch(error){
-    throw new GatewayError(error.name==='TimeoutError'?'The chat service timed out.':'The chat service could not be reached.');
+export function gatewayModel(env=process.env) {
+  const model = (env.AXON_GATEWAY_MODEL || DEFAULT_MODEL).trim();
+  if (!/^[a-z0-9-]+\/[a-zA-Z0-9._:-]+$/.test(model)) {
+    throw new GatewayError('Invalid model configuration.', 'config', 503);
   }
-  if(!r.ok){
-    const status=r.status;
-    // Do not expose backend error bodies or authentication tokens to visitors.
-    throw new GatewayError('AI Gateway returned HTTP '+status, status);
+  return model;
+}
+
+export async function gatewayGenerate(messages, req, {fetcher=fetch,env=process.env}={}) {
+  const token = gatewayToken(req,env);
+  if (!token) {
+    throw new GatewayError('AI Gateway credentials are missing. Enable AI Gateway for this Vercel project.', 'auth_missing', 503);
+  }
+  const model = gatewayModel(env);
+  let response;
+  try {
+    response = await fetcher(GATEWAY_URL, {
+      method: 'POST',
+      headers: {Authorization:`Bearer ${token}`, 'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model,
+        messages: [
+          {role:'system', content:'You are AXON AI, a helpful community-built AI project assistant. Answer correctly, clearly, and concisely. You are powered by pretrained assistance while a separate AXON student model is trained. Never claim the student model already has your capabilities. Say when you are unsure.'},
+          ...messages.slice(-11)
+        ],
+        max_tokens:500,
+        temperature:0.3,
+        stream:false,
+      }),
+      signal:AbortSignal.timeout(40000),
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw new GatewayError('Chat provider timed out.', 'timeout', 504, false);
+    }
+    throw new GatewayError('Chat provider could not be reached.', 'network', 503, false);
+  }
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) {
+      throw new GatewayError('AI Gateway rejected authentication. Check project AI Gateway access.', 'auth_rejected', 503);
+    }
+    if (response.status === 402) {
+      throw new GatewayError('AI Gateway credits or billing are unavailable.', 'billing', 503);
+    }
+    if (response.status === 429) {
+      throw new GatewayError('The AI provider is busy. Please try again shortly.', 'rate_limited', 503);
+    }
+    if (response.status === 404 || response.status === 400) {
+      throw new GatewayError('AI Gateway model settings are invalid.', 'model_unavailable', 503);
+    }
+    throw new GatewayError(`AI Gateway returned HTTP ${response.status}.`, 'upstream', 503);
   }
   let data;
-  try{data=await r.json();}catch{throw new GatewayError('Invalid response from AI Gateway.');}
-  const content=data?.choices?.[0]?.message?.content;
-  const answer=typeof content==='string'?content:Array.isArray(content)?content.filter(p=>p?.type==='text').map(p=>p.text||'').join('\n'):'';
-  if(!answer?.trim())throw new GatewayError('AI Gateway returned an empty reply.');
+  try { data = await response.json(); }
+  catch { throw new GatewayError('AI Gateway returned an invalid response.', 'invalid_response', 503); }
+  const content = data?.choices?.[0]?.message?.content;
+  const answer = typeof content === 'string' ? content
+    : Array.isArray(content) ? content.filter(v => v?.type==='text').map(v => v.text||'').join('\n')
+    : '';
+  if (!answer.trim()) throw new GatewayError('AI Gateway returned no reply.', 'empty_reply', 503);
   return answer.trim();
 }

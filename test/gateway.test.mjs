@@ -36,5 +36,5 @@ test('Missing Vercel auth returns a configuration error instead of an endless lo
 test('Provider failures reject clearly without echoing private response',async()=>{
  await assert.rejects(()=>gatewayGenerate([{role:'user',content:'hello'}],request,{
    env:{AI_GATEWAY_API_KEY:'private'},fetcher:async()=>({ok:false,status:401,json:async()=>({secret:'do-not-expose'})})
- }),e=>e.message==='AI Gateway returned HTTP 401'&&!e.message.includes('do-not-expose'));
+ }),e=>e.code==='auth_rejected'&&!e.message.includes('do-not-expose'));
 });

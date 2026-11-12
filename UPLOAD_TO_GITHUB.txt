@@ -1,9 +1,11 @@
-AXON AI — UPDATED WEBSITE
+AXON AI — CLEAN VERCEL DEPLOY
 
-1. Open AXONAI_Vercel after extracting this ZIP.
-2. Upload ALL contents of that folder to the root of your AXONAI GitHub repository (replace older files).
-3. In Vercel, verify your Root Directory contains vercel.json and package.json.
-4. Open Vercel Dashboard → AI Gateway and enable AI Gateway for this project.
-5. Redeploy, then refresh /chat.
+1. Extract this ZIP. Open AXONAI_Vercel.
+2. Upload the CONTENTS of this folder into the directory Vercel uses as its Root Directory.
+3. DELETE obsolete local-model files from the old repository version (especially old vercel/ and old API files). Uploading a replacement ZIP does NOT delete old GitHub files.
+4. Make sure this vercel.json and package.json are used in Vercel's Root Directory.
+5. In Vercel, enable AI Gateway for this project. If OIDC is unavailable, add AI_GATEWAY_API_KEY in Vercel project settings and redeploy. Do not commit secrets to GitHub.
+6. Redeploy with build cache disabled.
+7. Open https://YOUR-SITE/api/status and check local_model_installed=false and chat_credentials_present=true. Then send hello on /chat.
 
-No coordinator URL is needed for the pretrained chat. Student training still needs a separate persistent coordinator.
+The new backend uses hosted pretrained inference; it does not download local model weights to Vercel.

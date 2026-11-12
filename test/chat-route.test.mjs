@@ -18,7 +18,7 @@ test('Real API route returns hosted assistant reply with mocked gateway',async()
     await chat({method:'POST',headers:{},body:{messages:[{role:'user',content:'hello there'}]}},res);
     assert.equal(res.code,200);
     assert.equal(res.body.reply,'Hi from AXON AI');
-    assert.equal(res.body.mode,'pretrained-hosted');
+    assert.equal(res.body.mode,'pretrained');
   }finally{
     globalThis.fetch=priorFetch;
     if(prior===undefined)delete process.env.AI_GATEWAY_API_KEY;else process.env.AI_GATEWAY_API_KEY=prior;

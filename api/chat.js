@@ -1,78 +1,67 @@
-import { memoryAdmit, memoryStats } from '../server/memory.js';
 import { identityAnswer, validateMessages } from '../server/config.js';
 import { originAllowed, parseChatBody, rateLimit, turnstileConfig, verifyTurnstile } from '../server/security.js';
-let busy = false;
+import { simpleArithmetic } from '../server/arithmetic.js';
+import { getQuality, inferFromStudent } from '../server/coordinator.js';
+import { gatewayGenerate, GatewayError } from '../server/gateway.js';
 
 function rejectRate(res, seconds, message) {
   res.setHeader('Retry-After', String(seconds));
   return res.status(429).json({ error: message });
 }
 
-export default async function handler(req, res) {
-  res.setHeader('Cache-Control', 'no-store');
+export default async function handler(req,res) {
+  res.setHeader('Cache-Control','no-store');
   if (req.method !== 'POST') {
-    res.setHeader('Allow', 'POST');
-    return res.status(405).json({ error: 'Use POST.' });
+    res.setHeader('Allow','POST');
+    return res.status(405).json({error:'Use POST.'});
   }
-  if (!originAllowed(req)) return res.status(403).json({ error: 'This request must come from the AXONAI website.' });
-  const requestWait = rateLimit(req, 'requests');
-  if (requestWait) return rejectRate(res, requestWait, 'Too many requests. Please try again later.');
-
-  let body, messages;
+  if (!originAllowed(req)) return res.status(403).json({error:'This request must come from AXON AI.'});
+  const reqWait=rateLimit(req,'requests');
+  if (reqWait) return rejectRate(res,reqWait,'Too many requests. Try again shortly.');
+  let body,messages;
   try {
-    body = parseChatBody(req);
-    messages = validateMessages(body.messages);
+    body=parseChatBody(req);
+    messages=validateMessages(body.messages);
   } catch (error) {
-    return res.status(error.status || 400).json({ error: error.status ? error.message : 'Invalid chat request.' });
+    return res.status(error.status||400).json({error:error.status ? error.message : 'Invalid message.'});
   }
-  const config = turnstileConfig();
-  if (config.misconfigured) return res.status(503).json({ error: 'Security verification is not configured correctly.' });
-  // Check availability before consuming a single-use verification token.
-  if (busy) {
-    res.setHeader('Retry-After', '5');
-    return res.status(429).json({ error: 'The model is busy. Waiting for capacity.', retryable: true });
-  }
-  if (!memoryAdmit(memoryStats(), .9, 32 * 1024 * 1024)) {
-    res.setHeader('Retry-After', '10');
-    return res.status(503).json({ error: 'Server RAM is above the 90% admission threshold.', retryable: true });
-  }
-  const verification = await verifyTurnstile(req, body.turnstileToken, config);
-  if (!verification.ok) return res.status(verification.status).json({ error: verification.error });
-  const generationWait = rateLimit(req, 'generations');
-  if (generationWait) return rejectRate(res, generationWait, 'Message limit reached. Please try again shortly.');
-  const identity = identityAnswer(messages.at(-1).content);
-  if (identity) return res.status(200).json({ reply: identity, mode: 'vercel-local', model: 'AXON AI' });
+  const verification=await verifyTurnstile(req,body.turnstileToken,turnstileConfig());
+  if (!verification.ok) return res.status(verification.status).json({error:verification.error});
+  const genWait=rateLimit(req,'generations');
+  if (genWait) return rejectRate(res,genWait,'Message limit reached. Try again shortly.');
 
-  // Exact arithmetic is solved locally instead of relying on language-model guesses.
-  const {simpleArithmetic}=await import('../server/arithmetic.js');
-  const calculated=simpleArithmetic(messages.at(-1).content);
-  if(calculated!==null)return res.status(200).json({reply:calculated,mode:'calculation',model:'AXON AI'});
-  if (busy) {
-    res.setHeader('Retry-After', '5');
-    return res.status(429).json({ error: 'The model is busy. Please retry with fresh verification.' });
-  }
-  busy = true;
+  const last=messages.at(-1).content;
+  const identity=identityAnswer(last);
+  if (identity) return res.status(200).json({reply:identity,mode:'identity',model:'AXON AI'});
+  const arithmetic=simpleArithmetic(last);
+  if (arithmetic !== null) return res.status(200).json({reply:arithmetic,mode:'calculation',model:'AXON AI'});
+
   try {
-    // Never promote the student on the frontend alone. The coordinator must
-    // attest to a passing score for an approved checkpoint and serve it itself.
-    const {getQuality,inferFromStudent}=await import('../server/coordinator.js');
+    // Use the independently trained student only after the cloud coordinator
+    // reports an approved, evaluated checkpoint and successfully serves it.
     const quality=await getQuality();
     const studentReply=await inferFromStudent(messages,quality);
-    if(studentReply)return res.status(200).json({reply:studentReply,mode:'student',model:'AXON AI student',version:quality.version});
-    const {hostedGenerate,hasHosted}=await import('../server/hosted.js');
-    if(hasHosted()){
-      try{const reply=await hostedGenerate(messages);return res.status(200).json({reply,mode:'pretrained',model:'AXON AI'});}
-      catch(error){console.error('Hosted chat unavailable; using local model:',error.message)}
-    }
-    // Vercel AI Gateway handles inference without downloading a 786 MB model.
-    const { gatewayGenerate } = await import('../server/gateway.js');
-    const reply = await gatewayGenerate(messages,req);
-    return res.status(200).json({ reply, mode: 'pretrained-hosted', model: 'AXON AI' });
+    if (studentReply) return res.status(200).json({reply:studentReply,mode:'student',model:'AXON AI',version:quality.version});
+
+    // The pretrained reply is generated remotely. This Vercel Function does
+    // not need a local AI model, a GPU, or a RAM-intensive model download.
+    const reply=await gatewayGenerate(messages,req);
+    return res.status(200).json({reply,mode:'pretrained',model:'AXON AI'});
   } catch (error) {
-    console.error('AXONAI model error:', error);
-    const tooLong = error.message?.startsWith('Your message is too long');
-    return res.status(tooLong ? 400 : 503).json({
-      error: tooLong ? error.message : 'Chat is temporarily unavailable. Please try again shortly.'
+    const code=error instanceof GatewayError ? error.code : 'unknown';
+    // Only log a status category. Never include private tokens or raw prompts.
+    console.error('AXON AI chat backend:',code);
+    if (code==='auth_missing' || code==='auth_rejected') return res.status(503).json({
+      error:'Chat service is not connected. The site owner must enable AI Gateway in Vercel.',code
     });
-  } finally { busy = false; }
+    if (code==='billing') return res.status(503).json({
+      error:'Chat credits are unavailable. The site owner must check AI Gateway billing.',code
+    });
+    if (code==='model_unavailable' || code==='config') return res.status(503).json({
+      error:'Chat model is not configured correctly.',code
+    });
+    if (code==='rate_limited') return res.status(503).json({error:'Chat is temporarily busy. Try again shortly.',code});
+    if (code==='timeout') return res.status(504).json({error:'Chat timed out. Please try again.',code});
+    return res.status(503).json({error:'Chat is temporarily unavailable. Please try again.',code});
+  }
 }

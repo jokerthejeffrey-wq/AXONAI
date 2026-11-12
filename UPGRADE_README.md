@@ -1,5 +1,9 @@
-# AXON AI Chat repair
+# AXON AI — Chat backend replacement
 
-The earlier Qwen ONNX model downloads 786MB into a temporary Vercel function. This build replaces it with a server-side AI Gateway request (no local model weights). Enable AI Gateway for your Vercel project; it authenticates through Vercel OIDC. You can instead use a private `AI_GATEWAY_API_KEY` environment variable. Select another supported model with `AXON_GATEWAY_MODEL`.
+The old local Qwen/SmolLM2 downloads have been removed from this website package.
+The new chat routes to `openai/gpt-4.1-mini` using Vercel AI Gateway; nothing needs to be installed on a home PC.
 
-Do **not** set a coordinator URL to your Vercel chat domain. The separate student training coordinator is independent and is not hosted by the site. The pretrained helper stays active until a verified student is approved and a serving backend is configured.
+If your deployed site still says the model cannot generate a reply, you may be deploying the wrong GitHub folder, using an old Vercel deployment, or missing Gateway authentication/credits.
+Read UPLOAD_TO_GITHUB.txt and visit `/api/status` after redeploying.
+
+A Vercel deployment is stateless: the old ephemeral model cache cannot be deleted by site code. A fresh deployment replaces the code and no longer downloads those weights. This project intentionally does not include a dangerous remote delete command.
