@@ -1,0 +1,15 @@
+AXONAI WEBSITE — GITHUB / VERCEL
+
+Upload the CONTENTS of the AXONAI_Vercel folder into the Vercel project root (not the containing AXONAI_Vercel folder).
+
+Keep public/downloads/CPU-AXON.exe and public/downloads/GPU-AXON.exe in your commit.
+Your old GitHub repository has a different Python project; replace its package.json, vercel.json, api/, server/, scripts/, public/ and package-lock.json with this website build.
+Ensure Vercel Root Directory points to the directory containing this vercel.json.
+Commit/push; trigger a fresh Vercel deployment. The Downloads page then has working local links.
+
+Checks:
+  https://YOUR_SITE.vercel.app/downloads
+  https://YOUR_SITE.vercel.app/downloads/CPU-AXON.exe
+  https://YOUR_SITE.vercel.app/downloads/GPU-AXON.exe
+
+Windows EXEs are compiled and unsigned; their Windows bootstrap paths have not been tested. Both workers need a separately operated HTTPS training coordinator.

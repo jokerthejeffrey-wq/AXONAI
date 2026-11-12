@@ -2,7 +2,7 @@
 
 This is a separate deployment package. Chat runs the pretrained **SmolLM2-135M-Instruct ONNX Q4 model inside a Vercel Node.js Function**. You do NOT need to leave your PC on, start Flask, run cloudflared, configure AXON_API_URL, or buy an inference API key.
 
-The independent from-scratch student and its distributed training remain a separate project. This package does not pretend a Vercel temporary directory is a persistent training database. The **separately provided private trainer package** includes the coordinator and the CPU/GPU Python sources. This public Vercel ZIP intentionally does not ship those sources or any unbuilt EXE files. Chat works independently of it.
+The independent from-scratch student and its distributed training remain a separate project. This package does not pretend a Vercel temporary directory is a persistent training database. The **separately provided private trainer package** includes the coordinator and the CPU/GPU Python sources. This public Vercel ZIP includes the compiled CPU and GPU EXEs under `public/downloads/`, but does not expose the private trainer Python source. The EXEs are not digitally signed and the Windows runtime has not been verified in this environment. Chat works independently of it.
 
 ## Deploy — exact settings
 
@@ -63,7 +63,7 @@ Code inherits the AXONAI project MIT license. Separately downloaded pretrained m
 
 - Removed the left/right animated square tile columns from the home hero. The floor wave remains.
 - Removed `public/download/client.zip`, which exposed the Python training source to public visitors. Training code and the `.github/workflows/build-windows.yml` build instructions live in the **separate private ZIP**.
-- `/downloads` gives download guidance but does not pretend EXEs already exist; set `window.AXON_RELEASE_ASSET_BASE` in `public/config.js` after verified releases (pointing to the GitHub release `/releases/latest/download` base URL).
+- `/downloads` serves both compiled executables directly from the site. `CPU-AXON.exe` uses NumPy without PyTorch; `GPU-AXON.exe` installs CUDA-compatible PyTorch on first run. SHA-256 hashes are included in `public/downloads/SHA256SUMS.txt`. Windows runtime remains unverified. Do not place coordinator tokens or signing secrets in the website.
 - `/api/chat` uses Linux cgroup-aware memory accounting where available and refuses new generation when predicted memory use would exceed 90% of the runtime limit. The browser waits and retries when the server responds with `retryable:true`. These are best-effort limits, not guaranteed OS memory caps; per-instance and rate limits still apply.
 - The private coordinator runs on an always-on VPS or similar persistent host, not Vercel Functions. It atomically reserves example pairs in SQLite and stores contributor checkpoints for owner review.
 

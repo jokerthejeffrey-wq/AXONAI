@@ -1,1 +1,54 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AXONAI training downloads</title><link rel="stylesheet" href="/static/theme.css"><script src="/config.js"></script><script src="/static/theme.js"></script><style>body{font:15px/1.7 Arial,sans-serif;margin:0}main{max-width:780px;margin:60px auto;padding:24px}a{color:inherit}h1{font-size:42px;font-weight:400;letter-spacing:-2px}h2{font-size:24px;font-weight:400;margin-top:28px}p{color:var(--muted)}code{font-family:monospace;overflow-wrap:anywhere}.warn{border:1px solid var(--border);padding:18px;border-radius:12px}</style></head><body><main><a href="/">← AXONAI</a><h1>Training workers</h1><p>The Windows executables are built in the owner's private GitHub repository using the Windows build workflow. The files are not included until the owner publishes them as binary release assets.</p><section id="gpu"><h2>GPU-AXON.exe</h2><p>NVIDIA CUDA training worker. Only download the compiled binary from an AXONAI release published by the project owner. <a id="gpu-download" hidden>Download GPU-AXON.exe</a></p></section><section id="cpu"><h2>CPU-AXON.exe</h2><p>CPU training worker; no dedicated GPU needed. Training pauses when the predicted system RAM exceeds 90%. <a id="cpu-download" hidden>Download CPU-AXON.exe</a></p></section><div class="warn"><b>Current status</b><p>No executable assets are bundled in this Vercel package. The owner must build and upload them, then replace this message with the verified release download links.</p></div><h2>When binaries are available</h2><p>Open the Windows CMD console, choose the coordinator URL, and agree to share compute. The training service must be online independently of Vercel. Workers do not read personal documents.</p><p><a href="/docs">Documentation</a></p><script src="/static/downloads.js"></script></main></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AXONAI — Training workers</title>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme.js" defer></script>
+  <style>
+    body{font:15px/1.7 Arial,sans-serif;margin:0}
+    main{max-width:800px;margin:56px auto;padding:24px}
+    a{color:inherit}
+    h1{font-size:42px;font-weight:400;letter-spacing:-1.8px;margin:24px 0 12px}
+    h2{font-size:23px;font-weight:400;margin:0}
+    p{color:var(--muted);margin:8px 0}
+    .intro{margin-bottom:30px}
+    .items{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))}
+    .item{border:1px solid var(--border);padding:22px;border-radius:14px;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+    .label{font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:var(--muted)}
+    .dl{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:var(--fg,white);color:var(--bg,black);border-radius:999px;padding:10px 22px;margin-top:18px;font-weight:600;min-height:42px;box-sizing:border-box}
+    .dl:hover{opacity:.8}
+    .foot{margin-top:30px;border-top:1px solid var(--border);padding-top:20px}
+    .foot h2{font-size:20px;margin-bottom:8px}
+    .muted{color:var(--muted)}
+  </style>
+</head>
+<body>
+  <main>
+    <a href="/">← AXONAI</a>
+    <h1>Training workers</h1>
+    <p class="intro">Download the Windows training application for your hardware.</p>
+    <div class="items">
+      <section class="item" id="cpu">
+        <div class="label">CPU · Windows x64</div>
+        <h2>CPU-AXON.exe</h2>
+        <p>CPU-only training. Uses NumPy; does not install PyTorch or require a graphics card. Checks RAM usage before training jobs.</p>
+        <a class="dl" href="/downloads/CPU-AXON.exe" download="CPU-AXON.exe">Download CPU-AXON.exe ↓</a>
+      </section>
+      <section class="item" id="gpu">
+        <div class="label">NVIDIA GPU · Windows x64</div>
+        <h2>GPU-AXON.exe</h2>
+        <p>CUDA-accelerated training for compatible NVIDIA hardware. Downloads required GPU dependencies during initial setup.</p>
+        <a class="dl" href="/downloads/GPU-AXON.exe" download="GPU-AXON.exe">Download GPU-AXON.exe ↓</a>
+      </section>
+    </div>
+    <div class="foot">
+      <h2>Getting started</h2>
+      <p>Run the downloaded file on Windows. The first launch requires an internet connection to install the Python runtime and packages. Enter the HTTPS training coordinator address when prompted.</p>
+      <p>The training coordinator is a separate service; the AXONAI chat website is not the coordinator. Training begins only after you start the worker. The 90% RAM threshold is a best-effort admission limit, not a hard cap.</p>
+      <p><a href="/downloads/SHA256SUMS.txt">SHA-256 checksums</a> · <a href="/docs">Documentation</a></p>
+    </div>
+  </main>
+</body>
+</html>
