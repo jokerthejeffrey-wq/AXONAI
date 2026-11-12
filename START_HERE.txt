@@ -1,0 +1,35 @@
+AXONAI — COMMUNITY AI / VERCEL EDITION
+
+Quick chat:
+1. Extract the whole ZIP. Open AXONAI_Scratch in PyCharm with Python 3.11/3.12.
+2. Run: python HTML.py
+3. Approve installation of the isolated environment.
+4. Open http://127.0.0.1:5000/chat
+
+Default chat uses pretrained Qwen assistance while your independently initialized
+student is trained. The first general chat downloads the model (~1 GB) and can
+take several minutes. No paid API key is required. The UI says Qwen-assisted.
+Creator questions credit AXONAI's community and identify the pretrained assistance.
+
+Training stays separate:
+python TEACHER.py
+python REVIEW.py
+python manage.py init
+python HTML.py
+Then in another terminal: python CPU.py --server http://127.0.0.1:5000
+GPU.py is available for NVIDIA CUDA. Stop the backend before manage.py merge.
+
+Vercel deployment:
+Read VERCEL.md. Import the extracted project into Vercel, preset Other.
+Root: the folder with HTML.py and the top-level vercel.json.
+Build: node vercel/build.mjs
+Output: vercel/public
+Environment: AXON_API_URL=https://YOUR-PUBLIC-PYTHON-BACKEND
+On the backend: AXON_ALLOWED_ORIGINS=https://YOUR-PROJECT.vercel.app
+Your PC or a VPS must keep running the Python backend. Vercel hosts the frontend
+and downloadable client ZIP; it does not run the models in this package.
+
+When your student is ready:
+Evaluate it using CHAT_READINESS.md. Set AXON_CHAT_MODE=student and restart.
+There is no automatic or reliable universal 'smart enough' detector.
+Do not overwrite student_state or your reviewed data when updating an old install.

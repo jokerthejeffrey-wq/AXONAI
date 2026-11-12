@@ -1,0 +1,466 @@
+[
+  {
+    "concept": "greetings",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hi"
+      }
+    ]
+  },
+  {
+    "concept": "greetings",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello"
+      }
+    ]
+  },
+  {
+    "concept": "greetings",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Good morning"
+      }
+    ]
+  },
+  {
+    "concept": "greetings",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Greetings, how are you?"
+      }
+    ]
+  },
+  {
+    "concept": "closing",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Thanks, that is all. Goodbye!"
+      }
+    ]
+  },
+  {
+    "concept": "closing",
+    "messages": [
+      {
+        "role": "user",
+        "content": "I need to go now. See you later."
+      }
+    ]
+  },
+  {
+    "concept": "conversation_start",
+    "messages": [
+      {
+        "role": "user",
+        "content": "I want to talk but do not know where to start."
+      }
+    ]
+  },
+  {
+    "concept": "conversation_interest",
+    "messages": [
+      {
+        "role": "user",
+        "content": "I had a difficult day."
+      }
+    ]
+  },
+  {
+    "concept": "clarification",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Can you help me fix it?"
+      }
+    ]
+  },
+  {
+    "concept": "uncertainty",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What exact grade will I get tomorrow?"
+      }
+    ]
+  },
+  {
+    "concept": "planning",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Help me plan a small Python project."
+      }
+    ]
+  },
+  {
+    "concept": "python_print",
+    "messages": [
+      {
+        "role": "user",
+        "content": "How do I print Hello in Python?"
+      }
+    ]
+  },
+  {
+    "concept": "python_variables",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Explain what a variable is."
+      }
+    ]
+  },
+  {
+    "concept": "python_loops",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Give a tiny Python loop example."
+      }
+    ]
+  },
+  {
+    "concept": "python_lists",
+    "messages": [
+      {
+        "role": "user",
+        "content": "How do Python lists work?"
+      }
+    ]
+  },
+  {
+    "concept": "python_errors",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What does a NameError mean in Python?"
+      }
+    ]
+  },
+  {
+    "concept": "math_addition",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is 17 plus 8?"
+      }
+    ]
+  },
+  {
+    "concept": "math_subtraction",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is 19 minus 7?"
+      }
+    ]
+  },
+  {
+    "concept": "math_multiplication",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is 6 times 8?"
+      }
+    ]
+  },
+  {
+    "concept": "math_division",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is 36 divided by 4?"
+      }
+    ]
+  },
+  {
+    "concept": "math_fractions",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Explain one half in simple terms."
+      }
+    ]
+  },
+  {
+    "concept": "math_percent",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is ten percent of 80?"
+      }
+    ]
+  },
+  {
+    "concept": "science_water",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Why does water freeze?"
+      }
+    ]
+  },
+  {
+    "concept": "science_gravity",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Explain gravity in simple terms."
+      }
+    ]
+  },
+  {
+    "concept": "science_plants",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Why do plants need sunlight?"
+      }
+    ]
+  },
+  {
+    "concept": "science_sound",
+    "messages": [
+      {
+        "role": "user",
+        "content": "How does sound travel?"
+      }
+    ]
+  },
+  {
+    "concept": "writing_sentence",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Write a cheerful sentence about learning."
+      }
+    ]
+  },
+  {
+    "concept": "writing_summary",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Summarize: Rain fell. The plants absorbed water and grew."
+      }
+    ]
+  },
+  {
+    "concept": "writing_revision",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Make this polite: give me the file now."
+      }
+    ]
+  },
+  {
+    "concept": "learning_strategy",
+    "messages": [
+      {
+        "role": "user",
+        "content": "How can I remember something new?"
+      }
+    ]
+  },
+  {
+    "concept": "task_breakdown",
+    "messages": [
+      {
+        "role": "user",
+        "content": "How can I start a task that feels too big?"
+      }
+    ]
+  },
+  {
+    "concept": "comparison",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Compare a CPU with a GPU briefly."
+      }
+    ]
+  },
+  {
+    "concept": "ai_tokens",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is a token in a language model?"
+      }
+    ]
+  },
+  {
+    "concept": "ai_training",
+    "messages": [
+      {
+        "role": "user",
+        "content": "How is training different from using a trained model?"
+      }
+    ]
+  },
+  {
+    "concept": "ai_honesty",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Can AI answers be wrong?"
+      }
+    ]
+  },
+  {
+    "concept": "axon_identity",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What are you?"
+      }
+    ]
+  },
+  {
+    "concept": "format_list",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Give three simple ways to organize a desk."
+      }
+    ]
+  },
+  {
+    "concept": "format_brief",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Explain a computer in exactly one short sentence."
+      }
+    ]
+  },
+  {
+    "concept": "creativity",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Invent a name for a friendly robot."
+      }
+    ]
+  },
+  {
+    "concept": "reasoning_choice",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Should I carry an umbrella if heavy rain is forecast? Why?"
+      }
+    ]
+  },
+  {
+    "concept": "correction",
+    "messages": [
+      {
+        "role": "user",
+        "content": "I said 2 plus 2 equals 5. Is that right?"
+      }
+    ]
+  },
+  {
+    "concept": "empathy",
+    "messages": [
+      {
+        "role": "user",
+        "content": "I made a mistake and feel embarrassed."
+      }
+    ]
+  },
+  {
+    "concept": "boundaries",
+    "messages": [
+      {
+        "role": "user",
+        "content": "I do not want to discuss this subject anymore."
+      }
+    ]
+  },
+  {
+    "concept": "preferences",
+    "messages": [
+      {
+        "role": "user",
+        "content": "I prefer short answers. Can you keep that in mind?"
+      }
+    ]
+  },
+  {
+    "concept": "followup_reference",
+    "messages": [
+      {
+        "role": "user",
+        "content": "How should I start learning Python?"
+      },
+      {
+        "role": "assistant",
+        "content": "Try a small coding exercise every day."
+      },
+      {
+        "role": "user",
+        "content": "How long should I do that?"
+      }
+    ]
+  },
+  {
+    "concept": "followup_change",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Write a story idea about a dog."
+      },
+      {
+        "role": "assistant",
+        "content": "A dog discovers a hidden garden."
+      },
+      {
+        "role": "user",
+        "content": "Actually make it about a cat."
+      }
+    ]
+  },
+  {
+    "concept": "followup_context",
+    "messages": [
+      {
+        "role": "user",
+        "content": "My favorite color is blue."
+      },
+      {
+        "role": "assistant",
+        "content": "Blue is a lovely choice."
+      },
+      {
+        "role": "user",
+        "content": "What color did I mention?"
+      }
+    ]
+  },
+  {
+    "concept": "followup_close",
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is 3 times 4?"
+      },
+      {
+        "role": "assistant",
+        "content": "3 times 4 is 12."
+      },
+      {
+        "role": "user",
+        "content": "That answers my question, thanks. Bye."
+      }
+    ]
+  }
+]

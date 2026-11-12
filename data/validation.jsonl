@@ -1,0 +1,4 @@
+{"concept": "validation_greeting", "messages": [{"role": "user", "content": "Hey there!"}], "response": "Hello! What would you like to talk about?"}
+{"concept": "validation_math", "messages": [{"role": "user", "content": "What is 4 plus 3?"}], "response": "4 plus 3 is 7."}
+{"concept": "validation_closing", "messages": [{"role": "user", "content": "Thanks for helping. I am leaving now."}], "response": "You are welcome. Goodbye!"}
+{"concept": "validation_context", "messages": [{"role": "user", "content": "I have a red bicycle."}, {"role": "assistant", "content": "That sounds nice."}, {"role": "user", "content": "What color is my bicycle?"}], "response": "Your bicycle is red."}

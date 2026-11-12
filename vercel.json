@@ -1,0 +1,1 @@
+{"framework":null,"buildCommand":"node vercel/build.mjs","outputDirectory":"vercel/public","rewrites":[{"source":"/chat","destination":"/chat.html"},{"source":"/docs","destination":"/docs.html"}],"headers":[{"source":"/config.js","headers":[{"key":"Cache-Control","value":"no-store"}]}]}
