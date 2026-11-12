@@ -1,0 +1,25 @@
+AXON AI — Vercel deploy (fix for old project conflict)
+
+This directory contains the complete current AXON AI website and chat API.
+The old GitHub repository still has a separate Python project and an old
+vercel.json at its root. Do not build that root folder.
+
+STEP 1. Extract the ZIP; keep the AXONAI_Vercel folder name.
+STEP 2. Upload the entire AXONAI_Vercel folder into the root of your AXONAI GitHub repository.
+STEP 3. In Vercel -> Project -> Settings -> Build and Deployment:
+  - Root Directory: AXONAI_Vercel (not ./ and not vercel)
+  - Framework Preset: Other
+  - Build Command: npm run build (or do not override)
+  - Output Directory: public (or do not override)
+  - Install Command: npm ci (or do not override)
+  - Node.js: 22.x
+STEP 4. Redeploy, using Redeploy without cache if offered.
+STEP 5. Check /api/status; then try /chat.
+
+The site uses AI Gateway for hosted replies. A successful deployment does NOT
+ensure chat will work until AI Gateway authentication is enabled on the Vercel
+project, or AI_GATEWAY_API_KEY is configured in Vercel Environment Variables.
+Never put secret keys in public/ files.
+
+If deployment still fails, open Vercel -> Project -> Deployments -> failed
+build -> Build Logs; copy the last 20-30 lines containing 'Error'.

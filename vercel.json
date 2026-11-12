@@ -60,6 +60,5 @@
         }
       ]
     }
-  ],
-  "installCommand": "node scripts/install.mjs"
+  ]
 }

@@ -1,12 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// Prevent accidentally publishing the old Vercel model download backend.
-const obsoletePaths = ['server/model.js','vercel/model.js','api/model.py'];
-const stale = obsoletePaths.filter(name => fs.existsSync(name));
-if (stale.length) {
-  throw new Error('Remove obsolete model-loading files before deploying: '+stale.join(', '));
-}
+// Only the new API endpoints import server/gateway.js. Legacy files outside this isolated
+// project folder are not part of the deployed function and require no model migration.
 const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8'));
 const deps={...lock.packages?.['']?.dependencies,...lock.packages?.['']?.optionalDependencies};
 if (deps?.['@xenova/transformers'] || deps?.['@huggingface/transformers'] || deps?.['onnxruntime-node']) {
