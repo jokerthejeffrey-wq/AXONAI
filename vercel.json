@@ -1,1 +1,66 @@
-{"framework":null,"buildCommand":"node vercel/build.mjs","outputDirectory":"vercel/public","rewrites":[{"source":"/chat","destination":"/chat.html"},{"source":"/docs","destination":"/docs.html"}],"headers":[{"source":"/config.js","headers":[{"key":"Cache-Control","value":"no-store"}]}]}
+{
+  "framework": null,
+  "buildCommand": "npm run build",
+  "outputDirectory": "public",
+  "functions": {
+    "api/chat.js": {
+      "maxDuration": 300,
+      "excludeFiles": "{test/**,node_modules/onnxruntime-node/bin/napi-v3/{darwin,win32}/**,node_modules/onnxruntime-node/bin/napi-v3/linux/arm64/**,node_modules/onnxruntime-node/bin/napi-v3/linux/x64/*cuda*,node_modules/onnxruntime-node/bin/napi-v3/linux/x64/*tensorrt*}"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/chat",
+      "destination": "/chat.html"
+    },
+    {
+      "source": "/docs",
+      "destination": "/docs.html"
+    },
+    {
+      "source": "/downloads",
+      "destination": "/downloads.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://challenges.cloudflare.com; style-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; img-src 'self' data: https://challenges.cloudflare.com; font-src 'self' data:; upgrade-insecure-requests"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+        },
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "same-origin"
+        }
+      ]
+    },
+    {
+      "source": "/config.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    }
+  ],
+  "installCommand": "node scripts/install.mjs"
+}

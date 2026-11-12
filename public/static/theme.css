@@ -1,0 +1,30 @@
+:root{--bg:#fff;--fg:#111;--muted:#777;--panel:#f6f6f6;--border:#e7e7e7;--white:var(--bg);--black:var(--fg);--line:var(--border);color-scheme:light}
+html[data-theme=dark]{--bg:#101010;--fg:#f1f1f1;--muted:#999;--panel:#181818;--border:#303030;color-scheme:dark}
+body{background:var(--bg);color:var(--fg)}
+header{background:var(--bg)}.navlinks a,.footlinks,.footlinks button,.specs div{color:var(--muted)}
+.train{background:var(--panel)}.traincard{background:var(--bg)}.traincard p,.section-head p{color:var(--muted)}
+.hero{background:#101010}.hero .btn:hover span{color:#111}.gridreveal .cells i{background:var(--bg);border-color:var(--border)}
+.theme-toggle{border:1px solid var(--border);background:transparent;color:var(--fg);width:38px;height:38px;display:inline-flex;justify-content:center;align-items:center;cursor:pointer;border-radius:50%;flex:none}
+.theme-toggle svg{width:17px;height:17px}.nav-actions{display:flex;align-items:center;gap:14px}.try-button{background:#080808;color:white;border:1px solid #333;padding:12px 18px;font-size:12px;display:flex;align-items:center;gap:21px}.try-button span{font-size:19px}.try-button:hover{background:#303030}
+html[data-theme=dark] .btn:hover span{color:#111}.feed{border-top:1px solid var(--border)}
+/* Cross-fade theme colors only on deliberate toggles, never on initial load. */
+html{background:var(--bg)}
+html.theme-changing,html.theme-changing *,html.theme-changing *::before,html.theme-changing *::after{
+ transition:background-color .38s ease,color .38s ease,border-color .38s ease,box-shadow .38s ease,fill .38s ease,stroke .38s ease!important;
+}
+.theme-toggle{position:relative;padding:0;overflow:hidden}
+.theme-toggle .theme-sun,.theme-toggle .theme-moon{position:absolute;inset:0;display:grid;place-items:center;transition:opacity .3s ease,transform .38s ease!important}
+.theme-toggle .theme-sun{opacity:0;transform:rotate(-50deg) scale(.75)}
+.theme-toggle .theme-moon{opacity:1;transform:rotate(0) scale(1)}
+html[data-theme=dark] .theme-toggle .theme-sun{opacity:1;transform:rotate(0) scale(1)}
+html[data-theme=dark] .theme-toggle .theme-moon{opacity:0;transform:rotate(50deg) scale(.75)}
+@media(prefers-reduced-motion:reduce){
+ html.theme-changing,html.theme-changing *,html.theme-changing *::before,html.theme-changing *::after,.theme-toggle .theme-sun,.theme-toggle .theme-moon,#send{transition:none!important}
+}
+/* Fully rounded controls; restrained rounding on larger frames. */
+:root{--control-radius:9999px;--frame-radius:12px}
+.btn,.try-button{border-radius:var(--control-radius);min-height:42px;justify-content:center;padding-inline:22px}
+.hero .btn,.btn.small,.cta .btn{border-radius:var(--control-radius);padding-inline:22px}
+.btn::before{border-radius:inherit}
+.hero,.traincols,.gridreveal,.progress-wrap,.feed{border-radius:var(--frame-radius);overflow:hidden}
+dialog,pre{border-radius:var(--frame-radius)}

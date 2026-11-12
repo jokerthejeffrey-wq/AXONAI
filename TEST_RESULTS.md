@@ -1,40 +1,21 @@
-# Latest assisted-chat / Vercel update
+# Verification
 
-- All 13 automated tests passed, including community-creator answers, assisted routing, and student-only isolation.
-- Real Qwen inference on CPU produced "Hello! How can I assist you today?" through the new chat engine. No student model was loaded for the assisted response.
-- Root Vercel build succeeded with a test HTTPS backend origin. The bundled static client ZIP and source manifest are included.
-- Wave animation, smooth theme transitions and centered SVG send button are preserved.
-- Live Vercel hosting, Windows installer execution, GPU execution and browser visual rendering remain unverified.
+- Clean dependency installation using `node scripts/install.mjs`: passed; CUDA downloads skipped.
+- `npm test`: 5/5 API tests passed.
+- `npm run build`: passed; browser requests use same-origin API routes.
+- Actual quantized model download and CPU text generation: passed locally, about 22.4 seconds including startup and approximately 650 MiB process RSS. The small model produced a weak response; generation success does not establish conversational quality.
+- Local dependency tracing with @vercel/nft: approximately 78.6 MiB uncompressed after configured exclusions, below the documented 250 MB function bundle limit. Trace emitted optional Sharp/WASM and license parsing warnings; this estimate is not a completed Vercel deployment build.
+- Local runtime: Node 24.22.1 on Linux x64; deployment targets Node 22.x. npm reported the expected local engine mismatch warning.
+- No live deployment on your Vercel account was performed. Cold-start behavior, quotas and runtime compatibility must be confirmed after deployment.
+- This edition hosts chat only. Distributed training/checkpoint persistence requires separate infrastructure.
 
-The remaining results below describe the separately tested student-training pipeline.
+## November 12 modifications
 
-# Validation — from-scratch edition
+- Vercel/API tests: 8/8 passed, including cgroup-aware 90% RAM admission and creator attribution.
+- Coordinator tests: 5/5 passed (32 simulated concurrent workers, 256 distinct prompt/answer pairs; persistence, immutable reservations, upload idempotency and checkpoint merge).
+- `npm run build` passed with Node 22.16.0.
+- Coordinator HTTP protocol and one complete CPU worker training/upload session passed locally; Windows Nuitka build and live Vercel deployment have not been verified yet. No actual `.exe` files are shipped.
 
-Tested on Linux CPU with PyTorch 2.7.1, the version selected by the installer.
+## Security revision
 
-- Twelve automated tests: authentication, invalid upload rejection, causal attention (future tokens cannot influence earlier predictions), integrity manifest, CORS/download endpoints, four-use greeting group, simultaneous client budget enforcement, preserved budgets after data reimport/answer edits, duplicate/stale upload rejection, student gradients and tensor round trip, absence of teacher fallback, and source-repair hash acceptance/rejection.
-- The actual 3,423,744-parameter architecture was initialized randomly and trained for eight optimizer steps using reviewed teacher-generated lessons.
-- Full checkpoint upload, validation-gated merge and publication succeeded. Holdout loss changed from 5.52737 to 4.37255 in this small smoke test. This does NOT establish general ability or meaningful conversational quality.
-- The published student generated a response through the Flask chat API without importing Transformers/the teacher. Early output was not a capable assistant answer; no trained weights are distributed in this archive.
-- Rollback published a new version and preserved all consumed lesson budgets.
-- The actual pretrained teacher generated 48 curriculum drafts. AI-assisted review corrected errors before the supplied training examples were finalized. Raw drafts are separate from training data. Newly generated drafts require REVIEW.py approval/editing before import.
-- All 48 supplied training examples fit the 512-byte/control-token context.
-- Python files compiled, JavaScript syntax checks passed, and the Vercel build generated configuration from a valid HTTPS backend origin.
-
-Not verified here:
-- Windows winget/Python installation and native PowerShell execution.
-- NVIDIA CUDA execution/driver compatibility.
-- Live Vercel deployment, a real public HTTPS tunnel or production concurrency/load.
-- Browser visual rendering, which this execution sandbox blocks. No visual QA claim is made.
-- Fully unattended installation on every OS/network; bootstrap repair has defined limits documented in README.md.
-
-Run tests in the installed CPU environment:
-
-Windows:
-```
-.axon-cpu\Scripts\python.exe -m unittest discover -p "test_*.py" -v
-```
-Linux:
-```
-.axon-cpu/bin/python -m unittest discover -p "test_*.py" -v
-```
+The security test suite covers same-origin restrictions, malformed and oversized requests, unexpected payload fields, rate limits, secret non-disclosure, verification success/failure, action/hostname checks, and fail-closed configuration. All baseline website and memory tests are preserved. Dynamic Turnstile challenges and Vercel WAF deployment require live testing on the actual Vercel hostname.

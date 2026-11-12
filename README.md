@@ -1,136 +1,106 @@
-# AXONAI — independent student, teacher-assisted training
+# AXONAI — Vercel-only cloud chat
 
-This is a new architecture, not an update that can reuse the previous project's adapters. Extract it into a fresh folder and use the new `student_state/` directory.
+This is a separate deployment package. Chat runs the pretrained **SmolLM2-135M-Instruct ONNX Q4 model inside a Vercel Node.js Function**. You do NOT need to leave your PC on, start Flask, run cloudflared, configure AXON_API_URL, or buy an inference API key.
 
-The student is a **3,423,744-parameter causal transformer initialized randomly**. It has a new UTF-8 byte tokenizer (256 byte tokens plus four control tokens), four attention blocks, and a 512-token context. No pretrained weights or pretrained tokenizer are copied into the student. `student.py` imports PyTorch only; `CHAT.py` now defaults to pretrained-assisted mode; set AXON_CHAT_MODE=student to use only student inference. No pretrained weights are copied into the student.
+The independent from-scratch student and its distributed training remain a separate project. This package does not pretend a Vercel temporary directory is a persistent training database. The **separately provided private trainer package** includes the coordinator and the CPU/GPU Python sources. This public Vercel ZIP intentionally does not ship those sources or any unbuilt EXE files. Chat works independently of it.
 
-The separate `TEACHER.py` downloads Qwen2.5-0.5B-Instruct to create short training responses. Contributors train the independent student on that text. This is teacher-generated supervised training, sometimes called sequence-level distillation; it is not logit matching. The owner runs the teacher once per new curriculum example so each volunteer does not need to download and run it.
+## Deploy — exact settings
 
-## Honest expectations
+1. Extract the ZIP. Put the CONTENTS of the AXONAI_Vercel folder into your GitHub repository, or a separate folder in the repository. Keep your old training code/checkpoints separately.
+2. Import the repository into Vercel, or change the existing project's Root Directory to this AXONAI_Vercel folder.
+3. Framework preset: **Other**. Node.js version: **22.x**. Enable **Fluid Compute** in project settings; the function needs up to 300 seconds for a cold download/start.
+4. Settings from vercel.json:
+   - Install command: `node scripts/install.mjs`
+   - Build command: `npm run build`
+   - Output directory: `public`
+5. Remove the old **AXON_API_URL** setting. This build does not use it. No tunnel URL or AXON_ALLOWED_ORIGINS setting is needed for chat.
+6. Redeploy with the previous build cache disabled for the first migration. Open `/api/status` on your new .vercel.app site: it should return JSON with `hosting: "vercel"`.
+7. Open `/chat`, hard-refresh, and send a normal message. The first request on a new instance downloads about 181 MB of model weights plus tokenizer/config files into `/tmp`, then runs CPU inference. Allow a few minutes.
 
-Random initialization is not a smart chatbot. This small student and starter curriculum demonstrate a working training system, not a trained general assistant. It will initially generate nonsense. More volunteers alone do not solve data quality, model capacity or optimization. A four-use cap on every topic severely limits learning; respecting that cap cannot guarantee that the skill is learned. Creating new topic names solely to replay the same lesson defeats your requested rule.
+The package includes api/, server/, scripts/, public/, package.json, package-lock.json and vercel.json. The training workers and coordinator are distributed as a separate PRIVATE artifact. **Do not upload only public/**, and do not use the old `node vercel/build.mjs` command or `vercel/public` output path. The old project is not the same deployment layout.
 
-In student-only mode, replies are sampled autoregressively from the student's token probabilities, using the conversation as context, an end-of-turn token, temperature and a small repetition penalty. They are not chosen from a greeting/response table, and that mode has no teacher fallback. Creator questions use explicit community-attribution metadata rather than a guessed model biography. Tokens here are bytes, not whole words. The UI displays each finished reply; it is not a streaming typewriter effect. The context is only 512 bytes/control tokens, so long conversations lose older details. These mechanisms allow learned continuation; they do not guarantee reasoning or good conversation.
+## What gets installed
 
-## Files
+Vercel installs the pinned Transformers.js dependency and the bundled ONNX CPU runtime during deployment. `scripts/install.mjs` disables unnecessary CUDA downloads; there is no GPU on the target runtime. Model weights download automatically from the pinned public Hugging Face revision on the first non-identity message. Warm instances reuse the loaded model and cache.
 
-| File | Purpose |
-|---|---|
-| GPU.py / CPU.py | Console contribution programs with automatic environment setup |
-| START_GPU.cmd / START_CPU.cmd | Windows launchers; offer Python 3.12 installation if missing |
-| bootstrap.py | Isolated dependency install, one repair retry, hash-checked source repair |
-| TEACHER.py | Owner-only pretrained teacher download and lesson generation |
-| REVIEW.py | Approve, edit or reject teacher drafts before training |
-| student.py | Independent model, tokenizer, gradient training and generation |
-| CHAT.py | Assisted or student-only chat, shared by console and website |
-| HTML.py | Flask website/API, job assignment and contribution uploads |
-| manage.py | Initialize, import, review, publish, inspect budget, reject, rollback |
-| vercel/ | Static frontend ready for Vercel |
+The website and chat API use the same origin. Browser requests no longer depend on your PC, a temporary trycloudflare.com URL, or cross-origin Flask configuration. The model runs on Vercel's server CPU, not in the visitor's browser. There is no third-party inference API call.
 
-## Assisted chat while the student learns
+## Real limits
 
-Default: `AXON_CHAT_MODE=assisted`. `python HTML.py` installs the inference dependencies and downloads Qwen on the first non-identity chat. The UI labels replies **Qwen-assisted**. The app credits the AXONAI community while truthfully naming the pretrained underlying model. Chatting does not train the student or consume training budgets.
+The 8 GB shown in a build log describes the build machine; it is not your function's permanent disk or runtime RAM. Vercel documents Hobby Fluid Compute functions with 2 GB RAM and a 300-second maximum invocation. Functions have a read-only deployment filesystem and temporary writable scratch storage. This is why this package uses a small quantized model and `/tmp` caching instead of full PyTorch/Qwen installs.
 
-There is NO automatic claim that a low loss means the student is a good chatbot. Evaluate held-out questions, multi-turn follow-ups, accuracy and closing behavior first (see CHAT_READINESS.md). Then set `AXON_CHAT_MODE=student` and restart the backend. Switching back to `assisted` restores pretrained replies. The student remains randomly initialized at creation and learns only through the separate training pipeline.
+This is small-scale cloud inference, not an always-running GPU server. Vercel may discard caches between instances, so cold downloads can repeat. The free/Hobby plan has CPU, memory-time, transfer and invocation quotas; hosting is not unlimited free AI compute. Check your Vercel usage dashboard. Concurrent traffic may create separate instances, each loading its own model. The app's rate limiter is best-effort per instance, not a global quota; use Vercel's project controls for a public launch.
 
-## Owner setup
+SmolLM2 135M is substantially smaller than the previous Qwen 0.5B assistant. Expect limited reasoning, factual errors and short answers. Replies are limited to 128 new tokens and short conversation context. This package credits the AXONAI community and transparently identifies SmolLM2 assistance. It does not claim that the pretrained model itself was trained from scratch by AXONAI.
 
-Use Python 3.11/3.12 in PyCharm. Keep all files together. The scripts prompt to create isolated environments and install packages. They do not modify your PyCharm or system Python packages.
+## Troubleshooting
 
-```sh
-python TEACHER.py
-python REVIEW.py
-python manage.py init
-python HTML.py
-```
+- **Still 'Failed to fetch':** check that you deployed THIS root, not the old frontend. Hard-refresh. `/api/status` must return JSON from the same website.
+- **API route returns HTML/404:** api/ was not deployed, Root Directory is wrong, or the old build/output settings remain.
+- **CUDA installer download error:** set Install Command to `node scripts/install.mjs`; this skips GPU binaries. Do not replace it with an unconfigured `npm install`.
+- **Timeout:** confirm Fluid Compute and 300-second function duration. Review the Vercel Function logs. An interrupted cold download may need a retry.
+- **Model download failure:** check Vercel logs for Hugging Face/network errors. Model files must remain publicly downloadable.
+- **Bundle size:** the configuration excludes non-Linux-x64 and GPU native binaries. Weights are downloaded at runtime, not included in the function deployment.
+- **Memory/runtime error:** check logs; a local smoke test is not a guarantee of identical Vercel behavior. This package is prepared for deployment but no live project was deployed on your account.
+- **Training client cannot connect:** the coordinator is a separately deployed persistent HTTPS service, not this Vercel website. Deploy it from the private trainer ZIP and configure its public URL on the workers.
 
-The teacher runs on CPU by default. `python TEACHER.py --gpu` selects a separate CUDA environment. `--limit 10` generates up to ten missing curriculum responses. It resumes by source ID and never regenerates existing records automatically. The supplied training file contains 48 teacher-generated starter responses with AI-assisted corrections; verify them for your own use. Raw drafts are preserved in data/teacher_drafts.jsonl. New teacher outputs go ONLY to the draft file. REVIEW.py requires approval or correction before adding them to train.jsonl; the small teacher can make serious factual errors. Add genuinely new topics to `data/curriculum.json`, rerun the teacher, run REVIEW.py, stop HTML.py, then `python manage.py import` to import only new records without resetting counts.
+## Development
 
-`manage.py init` generates a random student checkpoint if none exists. It does not load Qwen weights. In student mode, version 0 is deliberately blocked until a training update is published. Default assisted chat works immediately, even before student training. Even after publication, early output will be poor. Terminal chat: `python CHAT.py`, with `/new` and `/quit` commands.
+Use Node 22. For a clean dependency install, run `node scripts/install.mjs`. Then `npm test` and `npm run build`. Use Vercel CLI's `vercel dev` for local function routing if desired. Local model smoke testing can import `generate` from server/model.js. Set AXON_CACHE_DIR to an accessible temporary directory if your environment has no writable `/tmp`.
 
-## Contributor installation and repair
+No conversation is stored by this application. It still processes prompts on Vercel, and infrastructure may keep request metadata. Model downloads go to Hugging Face; the code does not send prompts to Hugging Face inference services.
 
-Windows users extract the client ZIP and launch START_CPU.cmd or START_GPU.cmd. If Python 3.12 is missing, `start.ps1` offers installation through Microsoft's Windows Package Manager using the exact Python.Python.3.12 package. It does not request an administrator-wide install. If winget is unavailable, install 64-bit Python 3.12 from python.org and rerun. Linux/macOS need Python 3.11/3.12 available first.
+## References
 
-```sh
-python CPU.py --server https://YOUR-PYTHON-BACKEND --threads 2
-# OR:
-python GPU.py --server https://YOUR-PYTHON-BACKEND
-```
+- https://vercel.com/docs/functions/limitations
+- https://vercel.com/docs/functions/runtimes
+- https://huggingface.co/docs/transformers.js/tutorials/node
+- https://huggingface.co/onnx-community/SmolLM2-135M-Instruct-ONNX
 
-Missing dependencies are installed in `.axon-cpu`, `.axon-gpu`, `.axon-teacher`, or `.axon-teacher-gpu`. Setup tries a forced reinstall once if package installation/import checks fail. Package downloads can be several GB. GPU targets NVIDIA CUDA 12.8 and requires a compatible driver. The installer cannot fix an unsupported driver, unsupported OS, insufficient RAM/VRAM, no internet, full disk, antivirus block or every Python bug. No driver installation is attempted. CPU is the fallback.
+Code inherits the AXONAI project MIT license. Separately downloaded pretrained model and dependencies retain their respective licenses; see their model card/package notices.
 
-Source files are checked against the hashes in `client_manifest.json`. Missing/changed shared files can be restored from your backend after consent, but only if their SHA-256 matches the manifest shipped in the downloaded ZIP. Local edits are overwritten only after approval. If the launcher, bootstrap or manifest itself is missing/broken, re-extract a trusted complete ZIP. The manifest is a local integrity record, not a cryptographic publisher signature; distribute it through a trusted website. A new backend version cannot silently replace an old client's expected source; download a new complete ZIP when hashes differ.
+## November 12 update: public/private split, UI cleanup, and memory admission
 
-The downloaded client does not scan personal files or collect chats. It receives only shared student weights and teacher-written lessons. One job uses at most eight lessons, one optimizer step each, with batch size 1. `--rounds 3` requests three jobs. `--threads 2` is a thread cap, not a power/percent limit. `--yes` skips the compute consent only, not installation consent. Ctrl+C stops. Local partial work is discarded.
+- Removed the left/right animated square tile columns from the home hero. The floor wave remains.
+- Removed `public/download/client.zip`, which exposed the Python training source to public visitors. Training code and the `.github/workflows/build-windows.yml` build instructions live in the **separate private ZIP**.
+- `/downloads` gives download guidance but does not pretend EXEs already exist; set `window.AXON_RELEASE_ASSET_BASE` in `public/config.js` after verified releases (pointing to the GitHub release `/releases/latest/download` base URL).
+- `/api/chat` uses Linux cgroup-aware memory accounting where available and refuses new generation when predicted memory use would exceed 90% of the runtime limit. The browser waits and retries when the server responds with `retryable:true`. These are best-effort limits, not guaranteed OS memory caps; per-instance and rate limits still apply.
+- The private coordinator runs on an always-on VPS or similar persistent host, not Vercel Functions. It atomically reserves example pairs in SQLite and stores contributor checkpoints for owner review.
 
-## Four-use rule
+See `AXONAI_PRIVATE/README.md` in the separate private trainer package for the full Ubuntu-to-Windows build and coordinator setup.
 
-The server stores permanent use counters in SQLite, both per normalized conversation prompt and per curated concept group. It reserves a use atomically BEFORE issuing a job. There is no client-side epoch loop or replacement sampling. A topic can be scheduled at most **four times total**, shared across all official clients and jobs.
+## Website security (bot and injection protections)
 
-Hi, hello, greetings, good morning and other tagged greetings share `greetings`. The owner must label semantic variants consistently in `curriculum.json`. The alias rules recognize common standalone English greetings; they cannot perfectly detect every paraphrase or every language. This is explicit topic grouping, not a claim of universal semantic duplicate detection.
+This revision adds the following to the Vercel website:
 
-A changed answer or reimported normalized prompt does not reset its counter. Rejected, failed, abandoned, stale and expired jobs consume reservations permanently. Rollback does not restore uses. This conservative choice avoids accidentally training a lesson five times after a retry. It can waste scarce budget on failed jobs. The ledger counts ASSIGNED uses; an untrusted volunteer can modify their own program, so the coordinator cannot prove how many gradient steps a remote machine actually ran. Start with trusted contributors.
+- Strict server-side message structure and length limits, JSON content-type and 128 KiB request limit; rejects unexpected top-level fields.
+- Rejects cross-site browser requests using origin and Fetch Metadata headers. This is defense in depth, **not an authentication method**; HTTP clients may spoof or omit these headers.
+- Per-function-instance traffic limits (120 requests/minute and 8 accepted messages/minute per client) before expensive inference. These counters **do not** synchronize across Vercel instances, so they are not a global anti-abuse quota.
+- Content Security Policy, framing disabled, MIME sniffing disabled, limited browser permissions, and restrictive referrer policy. The chat UI uses `textContent` for user input and AI output, not HTML rendering.
+- Optional Cloudflare Turnstile verification on chat messages. The server verifies **each** single-use token using Cloudflare Siteverify, checks its expected action and hostname and rejects invalid tokens. If only one environment variable is set, requests fail closed rather than silently disabling the check.
+- System prompt guidance treats user content as untrusted, and the server enforces user/assistant role alternation. No protection can guarantee that a language model will never follow a malicious prompt injection.
 
-```sh
-python manage.py budget
-```
+### Activate Turnstile (recommended for a public chat)
 
-Do not delete the database, change topic labels to evade limits, or reset counters. Back up the whole `student_state/` directory while the server is stopped.
+1. In the **Cloudflare Turnstile** dashboard create a widget for your real site domain (e.g. `your-project.vercel.app`). You do **not** have to move website hosting to Cloudflare.
+2. In **Vercel → Project → Settings → Environment Variables**, add these two server environment variables for Production:
+   - `AXON_TURNSTILE_SITE_KEY` = your public site key
+   - `AXON_TURNSTILE_SECRET_KEY` = your private secret key (never put this in GitHub or `public/`)
+3. Redeploy to apply environment variables. `/api/security` should now report `turnstileEnabled: true` and the public site key, never the secret. The chat page displays a verification widget and its server API validates the resulting token. Enter **both** keys, not just one.
+4. Add Preview deployments/hostnames to your Turnstile allowed-hostnames settings if you want verification in preview URLs, or test directly on your final Production hostname. A hostname mismatch is rejected by design.
 
-## Publish contributions
+**Turnstile is OFF until both keys are set.** The basic checks still work without keys, but they cannot reliably stop determined bots.
 
-Stop HTML.py before modifying owner operations. Use one coordinator process and one state directory.
+### Enable Vercel Bot Protection (recommended even with Turnstile)
 
-```sh
-python manage.py list
-python manage.py merge UPDATE_ID_1 UPDATE_ID_2
-python HTML.py
-```
+In your project's **Vercel dashboard → Firewall → Rules → Bot Management**, choose the **Bot Protection** rule. Start with **Log** to observe traffic, then choose **Challenge**, click **Review Changes** and **Publish**. For repeated abusive calls, configure an additional **Firewall** custom rule for `/api/chat` with a rate limit or challenge. These edge rules are more effective at limiting bot costs across all serverless instances than the code-only limit.
 
-Merge accepts only same-version pending checkpoints. It checks tensor shapes, dtypes, finiteness and update magnitude, averages the selected student weights equally, then mixes 50% with the prior student. A separate validation dataset must show nonincreasing loss before publication. This is an experimental synchronous weight-averaging scheme, not guaranteed convergence or robust Byzantine aggregation. Jobs contain up to eight lessons, so equal weighting is per selected update, not sample-weighted.
+Vercel managed Bot Protection is available on all plans, but features/rate-limit usage and charges can change. Do not add a second reverse proxy in front of Vercel if you rely on Vercel bot detection without reviewing its compatibility limitations.
 
-The small included holdout only tests a few behaviors. It cannot rule out poisoning, backdoors or general regression. Review contributors and data. Larger public deployments need stronger identity, robust aggregation, richer private evaluation and monitoring. Do not automatically accept unknown uploads.
+References:
+- https://developers.cloudflare.com/turnstile/get-started/
+- https://developers.cloudflare.com/turnstile/get-started/server-side-validation/
+- https://vercel.com/docs/bot-management
+- https://vercel.com/docs/vercel-firewall/vercel-waf/rate-limiting
 
-```sh
-python manage.py reject UPDATE_ID
-python manage.py rollback OLD_VERSION
-```
-
-Rollback publishes old weights under a NEW version to invalidate in-flight jobs. It leaves training-use counters untouched. Rolling back to version 0 weights still makes a new version with untrained weights; it is a recovery tool, not training progress.
-
-The protocol uploads safetensors, never Python pickle. Full checkpoints are around 14 MB, and uploads are capped at 32 MiB. Keep `settings.py` identical on all clients. For architecture changes create a new project/state directory; existing weights are incompatible.
-
-## Website and Vercel
-
-Local website: http://127.0.0.1:5000 after `python HTML.py`. The landing page retains your black/white design; Try it ↗ opens chat, and the sun/moon control persists theme. The console ZIP is generated by an explicit allowlist, excluding state, secrets and owner tools.
-
-For a `your-project.vercel.app` frontend, follow **VERCEL.md**. Vercel serves static assets; browser requests go directly to your persistent Python backend over HTTPS. No teacher or student weights are bundled into Vercel functions. The small client ZIP is served statically by Vercel; model checkpoints and uploads go directly to the backend. The backend must remain online and have persistent storage.
-
-## Resource guidance
-
-The student has ~14 MB of float32 weights, plus activations and optimizer state. CPU is sufficient to test this small architecture; speed varies. The teacher is much larger and downloads ~1 GB of weights, with several GB of RAM needed while running. Run teacher generation separately from contribution training on low-memory machines. No GPU performance or memory guarantee is made.
-
-## Privacy and configuration
-
-Chat content stays in the current browser tab and is sent to the Python backend for inference; the application does not save it or add it to training. Infrastructure logs may retain request metadata. Contribution weights, job IDs and topic budgets persist.
-
-Environment variables:
-- `AXON_CHAT_MODE`: assisted (default) or student; restart server after changing.
-- `AXON_SERVER`: contributor default backend URL.
-- `AXON_STATE`: persistent student directory; defaults to student_state beside code.
-- `AXON_TRAIN_TOKEN`: optional shared contributor secret; match on server/client. Never place it in Vercel config or source.
-- `AXON_ALLOWED_ORIGINS`: comma-separated exact frontend origins allowed by CORS, e.g. https://my-axon.vercel.app.
-- `AXON_CHAT_DEVICE`: cpu by default. A CUDA deployment needs a CUDA-enabled backend environment.
-- `AXON_THREADS`: inference CPU threads, default 2.
-- `HOST` / `PORT`: default 127.0.0.1 / 5000. Waitress is used, not Flask debug mode.
-
-Built-in rate limits use the actual socket IP and intentionally ignore untrusted forwarded headers. Behind a tunnel/proxy, users may share a limit. Configure trusted edge limits if you scale. CORS is not authentication; Python clients can still call public APIs. A shared contributor token helps a trusted pilot but is not a per-person identity system.
-
-## Editing and rebuilding
-
-After deliberate edits to client source or templates, run `python build_project.py`. It regenerates the integrity manifest and copies UI assets into vercel/public. Redistribute the complete new client ZIP; old manifests will reject changed source repair files. Do not run this just to mask unexplained tampering.
-
-Tests: install dependencies, then run `python -m unittest discover -p "test_*.py" -v` in a configured environment. For automatic environment use, run `.axon-cpu/Scripts/python.exe` on Windows or `.axon-cpu/bin/python` on Linux. See TEST_RESULTS.md for what was actually tested.
-
-The code is MIT licensed. Teacher weights download separately and retain the upstream Qwen license. Teacher text should be reviewed for accuracy and permitted use before distribution. The archive contains no pretrained or trained student weights.
+**Do not treat a WAF, captcha, or string filter as a guarantee against every SQL injection, cross-site scripting, or prompt injection.** This website does not contain a SQL query endpoint; future APIs need their own parameterized database queries, authorization and validation.
