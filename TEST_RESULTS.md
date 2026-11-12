@@ -1,11 +1,8 @@
-# AXON AI hosted-chat repair — local verification
+# Local verification
 
-- Node.js 22; `npm test`: 25/25 passed.
-- `npm run build`: passed with no AI model download.
-- Static checks: No ONNX/safetensors/PyTorch files or legacy local-model loader in the new website package.
-- Hosted chat API: simulated successful AI Gateway reply passed.
-- Missing AI Gateway credentials: returns a specific configuration error without calling a model.
-- Public website: CPU and GPU EXE downloads preserved.
-- Same-origin request checks, rate limits, input validation, and optional Turnstile tests passed.
-
-**Not verified:** Live Vercel deployment, production OIDC/AI Gateway access, account credits, and Windows EXE execution. An owner must enable AI Gateway or set an API key in Vercel project settings, and deploy to the correct Root Directory.
+- `node --test test/*.test.mjs`: 29 passing tests using local **test-only stubs** for Neon and Vercel Blob (no cloud access).
+- `node scripts/build.mjs`: success.
+- Both CPU-AXON.exe and GPU-AXON.exe cross-compiled as Windows x64 console binaries.
+- Embedded Python loader smoke tests: CPU and GPU passed.
+- Full CPU session against **simulated** website API: downloaded 6 model chunks, trained a real lesson, uploaded 6 chunks and finalized a valid SHA-256 manifest.
+- **Not verified:** Vercel deployment, real Neon/Blob connections, EXE execution on Windows, GPU training, multi-user production concurrency.

@@ -10,5 +10,8 @@
     "build": "node scripts/build.mjs",
     "test": "node --test test/*.test.mjs"
   },
-  "dependencies": {}
+  "dependencies": {
+    "@neondatabase/serverless": "^1.0.2",
+    "@vercel/blob": "^2.9.0"
+  }
 }

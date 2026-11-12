@@ -1,23 +1,42 @@
-# AXON AI — Website (cloud chat)
+# AXON AI — one Vercel website + two Windows trainers
 
-This website is built for Vercel, with no home PC required for chat.
-The old local model downloader and Transformers/ONNX dependencies have been removed.
-The site uses `openai/gpt-4.1-mini` through Vercel AI Gateway for pretrained chat.
-No pretrained model weights are installed inside a Vercel Function.
+This folder is the **entire deployment**. It contains the public website, chat API,
+training API in Vercel Functions, starter checkpoint files, and both CPU/GPU EXEs.
+You do **not** deploy or keep a separate coordinator, Ubuntu server, or home PC online.
 
-## Deploy (replace the old website)
+### One-time owner setup
 
-1. Extract this ZIP and upload **all contents inside `AXONAI_Vercel`** to the actual **Vercel Root Directory** in GitHub. Do not upload the ZIP as a single file.
-2. Remove old model files and the older `vercel/` or other legacy application directories if they are still in that deployment root. Older GitHub files are NOT deleted automatically when new files are uploaded.
-3. Ensure the root contains this ZIP's `package.json`, `package-lock.json`, `vercel.json`, `api/`, `server/`, `public/`, and `scripts/`.
-4. In your Vercel dashboard, enable **AI Gateway** on this project. Vercel OIDC is supported, or you can create an AI Gateway key and set `AI_GATEWAY_API_KEY` in **Project Settings → Environment Variables** (Production), then redeploy. NEVER place this key in GitHub or the website.
-5. Deploy from the correct GitHub branch and root folder. In Vercel you can **Redeploy** and disable reuse of the build cache to ensure a clean replacement.
-6. Visit `/api/status` on your deployed site. `local_model_installed` must be `false`. `chat_credentials_present` should be `true` if authentication is available. Then open `/chat` and send `hello`.
+1. Upload the entire `AXONAI_Vercel` folder to your GitHub repo at its root.
+2. In Vercel, set **Root Directory = `AXONAI_Vercel`**, Framework Preset **Other**, Node.js **22.x**. Delete any legacy custom **Install Command** (do not use `npm ci` with this version); let it use `npm install`. Build command `npm run build`, Output Directory `public`.
+3. Deploy. In **Vercel → Storage / Marketplace**, add **Neon Postgres** to the project, which supplies `DATABASE_URL`. You do not have to write SQL manually; API creates its tables.
+4. In **Vercel → Storage**, create a **public Vercel Blob** store and connect it to the project, with the `BLOB_READ_WRITE_TOKEN` variable. This stores uploaded checkpoint pieces.
+5. In Vercel → Settings → Environment Variables, create a random `AXON_OWNER_TOKEN` (64 hex digits) for reviewing updates. Do not put it on the website or in GitHub. For AI chat also enable **AI Gateway** and its required authentication/credits.
+6. Redeploy after connecting storage. Open `https://YOUR-WEBSITE/api/status` and confirm `"training_available":true`.
+7. Edit `AXONAI_Vercel/public/worker-config.json` to `{"website_url":"https://YOUR-WEBSITE.vercel.app"}` and commit. The compiled CPU and GPU EXEs automatically read this public config from your GitHub repository when launched. This is **owner-only, once**. Do not enter a separate coordinator URL or tokens on volunteers' PCs.
 
-If `chat_credentials_present` is false, enable AI Gateway or configure the private API key and redeploy. If it is true but chat still fails, check Vercel → Logs → Functions for the sanitized `AXON AI chat backend` code. The error shown in chat will distinguish authentication, billing, and model configuration problems.
+Volunteer experience: download `CPU-AXON.exe` or `GPU-AXON.exe`, open it, and it automatically connects to the AXON AI WEBSITE. It installs its own required runtime on first launch and starts training until closed. CPU uses NumPy without PyTorch; GPU requires NVIDIA/CUDA. Both have a conservative 90% RAM threshold.
 
-**Important:** Vercel Functions are not persistent computers. New deployments replace application code and dependencies, but Vercel manages temporary caches from older deployments. This ZIP can't remotely delete another deployment's model files or your Vercel account data. It only stops shipping/loading the old local model. A hosted pretrained model is called by API; it is not installed on Vercel.
+### How training works
 
-**Training:** CPU/GPU EXEs remain available as downloads, but they need a separately hosted coordinator for actual distributed training. Chat remains pretrained until a coordinator certifies and serves an approved student checkpoint. The 90% RAM admission limit remains in workers; chat does not need to reserve RAM for a local model.
+- `POST /api/job` atomically assigns each worker eight unique lessons in Neon.
+- `GET /api/checkpoint/:version` returns a manifest of 2.5 MB chunks. Workers fetch chunks directly from the site's static assets / Vercel Blob and verify their SHA-256 checksum.
+- Workers upload a trained checkpoint in small chunks to `/api/update-part`, then finalize via `/api/update`. Each job has its own short-lived random authorization token, not a global shared secret.
+- Submissions stay pending owner review. Untrusted volunteers do **not** automatically rewrite the live AI.
+- `/api/admin-review` is owner-only. GET lists updates; POST accepts `{ "id": "<job id>", "action": "approve" }` or `"reject"`. Approval validates numeric tensors and limits weight changes before producing a new checkpoint. Use `Authorization: Bearer YOUR_AXON_OWNER_TOKEN`. Approved student checkpoints **do not replace pretrained chat automatically**, since a verified conversation-quality evaluation/inference service is not implemented on Vercel.
+- `GET /api/status` exposes non-sensitive progress metrics. Website chat uses AI Gateway and remains separate from training.
 
-**Security:** Input validation, same-origin restrictions, rate limiting and optional Cloudflare Turnstile are preserved. AI Gateway usage is metered; set budgets and firewall rules before promoting the website.
+### Owner review example
+
+```bash
+curl -H "Authorization: Bearer $AXON_OWNER_TOKEN" https://YOUR-WEBSITE/api/admin-review
+curl -X POST -H "Authorization: Bearer $AXON_OWNER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"id":"SUBMISSION_ID","action":"approve"}' https://YOUR-WEBSITE/api/admin-review
+```
+
+### Limits and important constraints
+
+Vercel Functions are short-lived: there is no always-running training process or coordinator daemon. Neon and Blob provide persistent storage, but have provider quotas/charges; monitor storage, transfer, AI Gateway use and firewall. Vercel's request body limit is 4.5 MB, hence chunked transfers. API caps jobs to 96 new claims per UTC day and 12 pending updates to reduce unbounded public spending. Use Vercel Firewall rate limits for `/api/job` and `/api/update-part` before advertising publicly. Avoid JavaScript/CAPTCHA challenges on these EXE endpoints, because Windows workers cannot complete browser challenges.
+
+The starting student is a small randomly initialized model trained from scratch, not a conversational model. Progress counts lessons assigned, not a GPT-3-equivalent intelligence score. Nothing here guarantees that it will become conversational merely from repeated simple lessons.
+
+The supplied EXEs were compiled for Windows x64 here and the CPU protocol was tested against a simulated website endpoint. **The live Vercel + Neon + Blob integration, actual Windows execution, and GPU training were not tested in this environment.** The executables contain Python bytecode and can be reverse-engineered.

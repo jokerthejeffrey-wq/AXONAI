@@ -1,11 +1,8 @@
-AXON AI — CLEAN VERCEL DEPLOY
-
-1. Extract this ZIP. Open AXONAI_Vercel.
-2. Upload the CONTENTS of this folder into the directory Vercel uses as its Root Directory.
-3. DELETE obsolete local-model files from the old repository version (especially old vercel/ and old API files). Uploading a replacement ZIP does NOT delete old GitHub files.
-4. Make sure this vercel.json and package.json are used in Vercel's Root Directory.
-5. In Vercel, enable AI Gateway for this project. If OIDC is unavailable, add AI_GATEWAY_API_KEY in Vercel project settings and redeploy. Do not commit secrets to GitHub.
-6. Redeploy with build cache disabled.
-7. Open https://YOUR-SITE/api/status and check local_model_installed=false and chat_credentials_present=true. Then send hello on /chat.
-
-The new backend uses hosted pretrained inference; it does not download local model weights to Vercel.
+AXON AI: one Vercel project, no separate coordinator.
+Upload AXONAI_Vercel to your GitHub repository root.
+Vercel Project > Settings > Root Directory: AXONAI_Vercel
+Build: npm run build   Output: public   Install: npm install   Node: 22.x
+Connect Neon Postgres + PUBLIC Vercel Blob store, add AXON_OWNER_TOKEN as a secret.
+Check https://YOUR-WEBSITE/api/status (training_available must be true).
+Edit AXONAI_Vercel/public/worker-config.json with your website production URL, commit and redeploy.
+See README.md for complete setup and review instructions.

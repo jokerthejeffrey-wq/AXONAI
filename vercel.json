@@ -5,9 +5,22 @@
   "functions": {
     "api/chat.js": {
       "maxDuration": 300
+    },
+    "api/admin-review.js": {
+      "maxDuration": 300
+    },
+    "api/update.js": {
+      "maxDuration": 60
+    },
+    "api/update-part.js": {
+      "maxDuration": 60
     }
   },
   "rewrites": [
+    {
+      "source": "/api/checkpoint/:version",
+      "destination": "/api/checkpoint?version=:version"
+    },
     {
       "source": "/chat",
       "destination": "/chat.html"

@@ -1,0 +1,30 @@
+export const initialCheckpoint = {
+  "parts": [
+    {
+      "url": "/model/v0-00.bin",
+      "size": 2500000
+    },
+    {
+      "url": "/model/v0-01.bin",
+      "size": 2500000
+    },
+    {
+      "url": "/model/v0-02.bin",
+      "size": 2500000
+    },
+    {
+      "url": "/model/v0-03.bin",
+      "size": 2500000
+    },
+    {
+      "url": "/model/v0-04.bin",
+      "size": 2500000
+    },
+    {
+      "url": "/model/v0-05.bin",
+      "size": 1199520
+    }
+  ],
+  "size": 13699520,
+  "sha256": "b7951bc8bc3c8187ae54b79653573e022a4cbac35454de6f8bbee91365b388f2"
+};

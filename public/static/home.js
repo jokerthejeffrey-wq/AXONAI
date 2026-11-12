@@ -2,7 +2,7 @@ const cells=document.getElementById('cells');for(let i=0;i<216;i++){const c=docu
 async function status(){
  try{const r=await axonFetch('/api/status');if(!r.ok)throw Error();const data=await r.json();
   const q=data.quality;const ready=Boolean(q?.ready);
-  document.getElementById('training-status').textContent=q?.tested?`Checkpoint v${q.version} evaluated`:'Not connected';
+  document.getElementById('training-status').textContent=data.training_available?`${data.training_progress||0} lessons assigned`:'Training offline';
   const score=typeof q?.score==='number'&&q.tested?Math.max(0,Math.min(100,q.score)):null;
   document.getElementById('axon-score').textContent=score===null?'—':score+'%';
   document.getElementById('axon-value').textContent=score===null?'—':score+'%';

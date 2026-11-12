@@ -1,9 +1,10 @@
 import { getQuality } from '../server/coordinator.js';
+import { publicStatus } from '../server/train-store.js';
 import { gatewayToken } from '../server/gateway.js';
 export default async function handler(req,res) {
   res.setHeader('Cache-Control','no-store');
   if (req.method!=='GET') return res.status(405).json({error:'Use GET.'});
-  const quality=await getQuality();
+  const [quality,training]=await Promise.all([getQuality(),publicStatus()]);
   return res.status(200).json({
     ok:true,
     model:'AXON AI',
@@ -12,7 +13,10 @@ export default async function handler(req,res) {
     // This checks that credentials are present, not that billing or the provider is healthy.
     chat_credentials_present:Boolean(gatewayToken(req)),
     local_model_installed:false,
-    training_available:Boolean(quality),
+    training_available:Boolean(training.training_available),
+    training_progress:training.reserved_lessons??0,
+    training_version:training.version??0,
+    pending_updates:training.pending_updates??0,
     quality:quality?{
       tested:Boolean(quality.tested),score:quality.score??null,
       ready:Boolean(quality.ready),version:quality.version??0,
