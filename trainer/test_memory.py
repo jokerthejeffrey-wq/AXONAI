@@ -34,7 +34,7 @@ class MemoryTests(unittest.TestCase):
             with self.assertRaisesRegex(MemoryAdmissionError,'Training stopped'):
                 wait(1100,max_wait_seconds=10,interval=5,clock=c.time,sleep=c.sleep,output=output)
         self.assertEqual(c.now,10)
-        self.assertLessEqual(output.getvalue().count('\\n'),1)
+        self.assertLessEqual(output.getvalue().count('\n'),1)
         self.assertIn('safe free',output.getvalue())
         self.assertIn('1100 MB',output.getvalue())
 
