@@ -15,7 +15,7 @@ def request(session,method,url,**kwargs):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--device',choices=['cpu','cuda'],default='cpu');p.add_argument('--server',default='https://axonai-theta.vercel.app');p.add_argument('--rounds',type=int,default=100)
-    p.add_argument('--cache',default=str(Path.home()/'.axonai'/'smoltalk-v1'));p.add_argument('--yes',action='store_true');args=p.parse_args()
+    p.add_argument('--cache',default=str(Path.home()/'.axonai'/'smoltalk-v1'));p.add_argument('--yes',action='store_true');p.add_argument('--teacher-check',action='store_true');args=p.parse_args()
     from urllib.parse import urlparse
     parsed=urlparse(args.server)
     if parsed.scheme!='https' or parsed.username or parsed.password:p.error('An HTTPS coordinator URL is required')
@@ -29,6 +29,12 @@ def main():
         print('Using NVIDIA GPU with CuPy.', flush=True)
     else:
         print('Using NumPy CPU training.', flush=True)
+    teacher = None
+    if args.teacher_check:
+        wait(2400)
+        from trainer.teacher import Teacher
+        print('Loading local pretrained reviewer (two independent checks).', flush=True)
+        teacher=Teacher('cpu')
     worker_file=Path(args.cache)/'worker-id'
     if not worker_file.exists():worker_file.write_text(str(uuid.uuid4()))
     worker=worker_file.read_text().strip();session=requests.Session();base=args.server.rstrip('/')
@@ -54,6 +60,17 @@ def main():
                         answer = answer.encode()[:budget].decode('utf-8', errors='ignore').rsplit(' ', 1)[0].strip()
                     if answer:
                         rows.append({'concept':'conversation', 'messages':context, 'response':answer})
+                if teacher:
+                    # The global corpus reservation gives every PC different seeds.
+                    # Only twice-approved generated records enter student training.
+                    item=teacher.generate_checked(raw,assignment['start']+offset)
+                    if item:
+                        rows.append(item)
+                        with (Path(args.cache)/'verified-generated.jsonl').open('a',encoding='utf-8') as output:
+                            output.write(json.dumps({'reservation':assignment['start']+offset,
+                                'checks':2,'row':item},ensure_ascii=False)+'\n')
+                    else:
+                        print('  Generated candidate rejected by local review.',flush=True)
             if not rows:print('No safe short examples in this reservation; skipping without replay.');continue
             manifest=request(session,'GET',base+f"/api/checkpoint/{job['version']}").json()
             with tempfile.TemporaryDirectory() as tmp:
@@ -79,7 +96,9 @@ def main():
                     request(session,'POST',base+'/api/update-part',data=data[index*chunk_size:(index+1)*chunk_size],headers={'Content-Type':'application/octet-stream','X-AXON-Job':job['id'],'X-AXON-Token':job['upload_token'],'X-AXON-Part':str(index)})
                 result=request(session,'POST',base+'/api/update',json={'job':job['id'],'token':job['upload_token'],'parts':parts,'size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
                 print(f"Round {n+1}: {len(rows)} distinct conversation examples submitted for validation.",flush=True)
-    finally:session.close()
+    finally:
+        session.close()
+        if teacher is not None: teacher.close()
 
 if __name__=='__main__':
     try:main()
