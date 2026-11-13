@@ -13,13 +13,11 @@ test('No provider packages or Gateway authentication required',()=>{
  assert.equal(existsSync('server/gateway.js'),false);
  assert.equal(existsSync('server/hosted.js'),false);
 });
-test('AXON AI has local basic replies without remote calls',async()=>{
- assert.match(localBasics('hello'),/^Hello/);
- assert.match(localBasics('Explain how AI learns'),/weights/);
+test('AXON AI does not hardcode greetings or arithmetic replies',async()=>{
  const res=response();await chat(req('hello'),res);
  assert.equal(res.code,200);
- assert.equal(res.body.mode,'local-basic');
- assert.match(res.body.reply,/Hello/);
+ assert.notEqual(res.body.mode,'local-basic');
+ assert.equal(typeof res.body.reply,'string');
 });
 test('Actual scratch checkpoint parses and generates entirely in-process',()=>{
  const checkpoint=Buffer.concat(Array.from({length:6},(_,i)=>readFileSync('public/model/v0-'+String(i).padStart(2,'0')+'.bin')));
