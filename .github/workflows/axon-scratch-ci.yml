@@ -1,7 +1,7 @@
 name: AXON scratch local chat tests
 on:
   push:
-    branches: [main, axon-scratch-local-only, fix-training-queue-mobile-nov13]
+    branches: [main, axon-scratch-local-only, fix-training-queue-mobile-nov13, axonai-curriculum-token-decoding-nov13]
   workflow_dispatch:
 
 permissions:
