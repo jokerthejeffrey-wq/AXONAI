@@ -12,6 +12,26 @@ function bubble(role, text) {
   window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
   return div;
 }
+// Present the model's completed text one word at a time. Actual model
+// computation remains token-by-token on the server; never insert model HTML.
+async function revealAssistant(text){
+  const div=bubble('assistant','');
+  const parts=String(text).match(/\S+\s*|\s+/gu)||[String(text)];
+  const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if(reduced || parts.length<3){
+    div.textContent=String(text);
+    return div;
+  }
+  for(let i=0;i<parts.length;i++){
+    div.textContent+=parts[i];
+    if(i%2===0){
+      await new Promise(resolve=>setTimeout(resolve,28));
+      window.scrollTo({top:document.body.scrollHeight,behavior:'instant'});
+    }
+  }
+  return div;
+}
+
 function resize() {
   prompt.style.height = 'auto';
   prompt.style.height = Math.min(prompt.scrollHeight, 130) + 'px';
@@ -74,7 +94,7 @@ document.getElementById('composer').onsubmit = async e => {
     }
     showChatMode();
     messages = [...outgoing, { role: 'assistant', content: data.reply }];
-    bubble('assistant', data.reply);
+    await revealAssistant(data.reply);
     statusEl.textContent = '';
   } catch (error) {
     userBubble?.remove();
