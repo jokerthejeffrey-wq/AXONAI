@@ -3,7 +3,7 @@ import hashlib,py_compile,subprocess,os,zipfile,shutil,urllib.request
 from pathlib import Path
 root=Path(__file__).resolve().parents[2];out=root/'exe-build';out.mkdir(exist_ok=True)
 stage=out/'payload';stage.mkdir(exist_ok=True)
-files=[root/'settings.py']+[p for p in (root/'trainer').glob('*.py') if not p.name.startswith('test_') and p.name != 'teacher.py']
+files=[root/'settings.py',root/'student.py']+[p for p in (root/'trainer').glob('*.py') if not p.name.startswith('test_') and p.name != 'teacher.py']
 for src in files:
  dst=stage/src.relative_to(root).with_suffix('.pyc');dst.parent.mkdir(parents=True,exist_ok=True)
  py_compile.compile(str(src),cfile=str(dst),dfile=str(src.relative_to(root)),doraise=True,invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH)
