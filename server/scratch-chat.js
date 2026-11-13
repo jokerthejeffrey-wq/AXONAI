@@ -21,10 +21,19 @@ export function readableReply(answer){
   return letters.length>=7&&letters.length/chars.length>=.6&&
     new Set(letters.map(c=>c.toLowerCase())).size>=5&&answer.trim().split(/\s+/u).length>=3;
 }
-export function localBasics(text){
+export function localBasics(text,history=[]){
   const t=String(text).trim().toLowerCase().replace(/[.!?]+$/,'');
-  if(/^(hello|hi|hey|hello axon|hi axon|good morning|good evening|good afternoon)$/.test(t))
-    return 'Hello! What would you like to ask?';
+  if(/^(hello|hi|hey|hello axon|hi axon|good morning|good evening|good afternoon)$/.test(t)){
+    const variants=[
+      'Hello! What would you like to ask?',
+      'Hi! What topic are you interested in?',
+      'Hey! What would you like to learn?',
+      'Hello again. What can I help with?',
+      'Hi there. Tell me what you are working on.'
+    ];
+    const previous=history.filter(m=>m.role==='assistant'&&variants.includes(m.content)).length;
+    return variants[previous%variants.length];
+  }
   if(/^(what can you help me with|what can you do|help)$/.test(t))
     return 'I can handle basic calculations and explain the AXON AI project. My independently trained language model is still learning.';
   if(/^(explain how ai learns|how does ai learn|how do ai models learn)$/.test(t))
@@ -35,7 +44,7 @@ export function localBasics(text){
 }
 export const STILL_TRAINING='AXON AI is still learning. I cannot answer that reliably yet.';
 export async function scratchAnswer(messages,quality,{load=loadStudent,generate=scratchGenerate}={}){
-  const version=Number(quality?.version||0),basic=localBasics(messages.at(-1).content);
+  const version=Number(quality?.version||0),basic=localBasics(messages.at(-1).content,messages);
   if(basic)return {reply:basic,mode:'local-basic',version};
   if(!Number.isSafeInteger(version)||version<0)return {reply:STILL_TRAINING,mode:'learning',version:0};
   try{
