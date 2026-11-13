@@ -1,0 +1,26 @@
+name: AXON mobile viewport check
+on:
+  push:
+    branches: [fix-training-queue-mobile-nov13]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  viewport:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - run: npm install --no-save --no-audit --no-fund playwright@1.58.2
+      - run: npx playwright install --with-deps chromium
+      - name: Test common phone and tablet widths
+        run: |
+          python3 -m http.server 8765 --directory public >/tmp/axon-web.log 2>&1 &
+          sleep 2
+          node scripts/mobile-smoke.mjs
