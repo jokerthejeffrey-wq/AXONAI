@@ -9,7 +9,6 @@ async function status(){
   document.getElementById('axon-ring').style.strokeDashoffset=String(735.133*(1-(score??0)/100));
   document.getElementById('axon-fill').style.width=(score??0)+'%';
   document.getElementById('axon-version').textContent=q?.tested?'VERSION '+q.version:`VERSION ${data.training_version||0} / UNTESTED`;
-  document.getElementById('axon-chat-mode').textContent='AXON AI scratch model';
   document.getElementById('axon-explanation').textContent=!q?.tested?'Model is training. Independent quality tests are not available yet.':ready?'AXON AI has passed its readiness tests.':`${q.passed}/${q.total} tests passed.`;
  }catch(e){document.getElementById('training-status').textContent='Not connected';}
 }

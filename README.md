@@ -1,47 +1,29 @@
-# AXON AI — one Vercel website + two Windows trainers
+# AXON AI
 
-This folder is the **entire deployment**. It contains the public website, chat API,
-training API in Vercel Functions, starter checkpoint files, and both CPU/GPU EXEs.
-You do **not** deploy or keep a separate coordinator, Ubuntu server, or home PC online.
+AXON AI is an independently trained experimental transformer. The website, model-inference API, and training coordination API run on Vercel. Training checkpoints and progress are stored in Vercel Blob and Neon Postgres. The website does **not** need Vercel AI Gateway.
 
-### One-time owner setup
+## Windows CPU and GPU trainers
 
-1. Upload the entire `AXONAI_Vercel` folder to your GitHub repo at its root.
-2. In Vercel, set **Root Directory = `AXONAI_Vercel`**, Framework Preset **Other**, Node.js **22.x**. Delete any legacy custom **Install Command** (do not use `npm ci` with this version); let it use `npm install`. Build command `npm run build`, Output Directory `public`.
-3. Deploy. In **Vercel → Storage / Marketplace**, add **Neon Postgres** to the project, which supplies `DATABASE_URL`. You do not have to write SQL manually; API creates its tables.
-4. In **Vercel → Storage**, create a **public Vercel Blob** store and connect it to the project, with the `BLOB_READ_WRITE_TOKEN` variable. This stores uploaded checkpoint pieces.
-5. In Vercel → Settings → Environment Variables, create a random `AXON_OWNER_TOKEN` (64 hex digits) for reviewing updates. Do not put it on the website or in GitHub. Enable **AI Gateway** for the Vercel project. This site uses the official AI SDK, so deployed functions normally authenticate automatically with Vercel OIDC; a genuine `AI_GATEWAY_API_KEY` is an optional alternative. AI Gateway requires available credits/billing. Never use a random AXON app secret as an AI Gateway key.
-6. Redeploy after connecting storage. Open `https://YOUR-WEBSITE/api/status` and confirm `"training_available":true`.
-7. The trainers are already configured for `https://axonai-theta.vercel.app`. No URL needs to be entered by volunteers. Only recompile the EXEs if you change the site's address.
+Download `CPU-AXON.exe` or `GPU-AXON.exe` from the website. Running one starts a local console, installs Python and pinned dependencies on first launch, prepares a cached conversational corpus, downloads a local pretrained 0.5B teacher, and trains the AXON transformer on the volunteer's computer. The trainer does not use the pretrained teacher for website chat.
 
-Volunteer experience: download `CPU-AXON.exe` or `GPU-AXON.exe`, open it, and it automatically connects to the AXON AI WEBSITE. It installs its own required runtime on first launch and starts training until closed. CPU uses NumPy without PyTorch; GPU requires NVIDIA/CUDA. Both have a conservative 90% RAM threshold.
+The console displays ASCII progress bars and approximate remaining times when measurable. Setup is cached across launches; installation times depend on bandwidth and hardware. Both trainers use full-gradient PyTorch. GPU requires a supported NVIDIA CUDA driver; CPU uses a CPU-only runtime. Training pauses when the predicted 90% RAM threshold would be exceeded; this is not a hard memory limit. Ctrl+C stops training.
 
-### How training works
+## How data is used
 
-- `POST /api/job` atomically assigns each worker eight unique lessons in Neon.
-- `GET /api/checkpoint/:version` returns a manifest of 2.5 MB chunks. Workers fetch chunks directly from the site's static assets / Vercel Blob and verify their SHA-256 checksum.
-- Workers upload a trained checkpoint in small chunks to `/api/update-part`, then finalize via `/api/update`. Each job has its own short-lived random authorization token, not a global shared secret.
-- Submissions stay pending owner review. Untrusted volunteers do **not** automatically rewrite the live AI.
-- `/api/admin-review` is owner-only. GET lists updates; POST accepts `{ "id": "<job id>", "action": "approve" }` or `"reject"`. Approval validates numeric tensors and limits weight changes before producing a new checkpoint. Use `Authorization: Bearer YOUR_AXON_OWNER_TOKEN`. Approved student checkpoints **do not replace pretrained chat automatically**, since a verified conversation-quality evaluation/inference service is not implemented on Vercel.
-- `GET /api/status` exposes non-sensitive progress metrics. Website chat uses AI Gateway and remains separate from training.
+The initial corpus comes from a pinned revision of HuggingFaceTB/smol-smoltalk (Apache-2.0). The measured cache contains approximately 1 GB and 213,571 deduplicated conversations. It does not contain 15 million unique training examples. Adding synthetic duplicates to reach a large line count would not necessarily improve model quality.
 
-### Owner review example
+Neon reserves non-overlapping corpus ranges across volunteers. The local pretrained teacher proposes a different question-and-answer version from each assigned record; two separately prompted local checks must both return PASS before the example is included. Verified records are cached locally. These two checks reduce some errors but do **not** guarantee factual accuracy, independence, or freedom from model mistakes.
 
-```bash
-curl -H "Authorization: Bearer $AXON_OWNER_TOKEN" https://YOUR-WEBSITE/api/admin-review
-curl -X POST -H "Authorization: Bearer $AXON_OWNER_TOKEN" -H "Content-Type: application/json" \
-  -d '{"id":"SUBMISSION_ID","action":"approve"}' https://YOUR-WEBSITE/api/admin-review
-```
+The worker updates all student transformer weights using full backpropagation rather than training only the output layer. Updates are submitted as safetensors, checked for numerical bounds and limited regressions, and merged by the website's training system. The website runs only its own student model for chat. Hardcoded arithmetic and fixed greeting routes are removed.
 
-### Limits and important constraints
+## Configuration
 
-Vercel Functions are short-lived: there is no always-running training process or coordinator daemon. Neon and Blob provide persistent storage, but have provider quotas/charges; monitor storage, transfer, AI Gateway use and firewall. Vercel's request body limit is 4.5 MB, hence chunked transfers. API caps jobs to 96 new claims per UTC day and 12 pending updates to reduce unbounded public spending. Use Vercel Firewall rate limits for `/api/job` and `/api/update-part` before advertising publicly. Avoid JavaScript/CAPTCHA challenges on these EXE endpoints, because Windows workers cannot complete browser challenges.
+Deploy the project using Vercel with root directory at the repository root, Node.js 22, output directory `public`. Attach Neon (`DATABASE_URL`) and Vercel Blob storage to the Production deployment. The model can serve basic chat without installing AI Gateway. `AXON_OWNER_TOKEN` can be used for reviewing training updates; keep it private.
 
-The starting student is a small randomly initialized model trained from scratch, not a conversational model. Progress counts lessons assigned, not a GPT-3-equivalent intelligence score. Nothing here guarantees that it will become conversational merely from repeated simple lessons.
+The EXEs are configured for https://axonai-theta.vercel.app. Downloads and updates use this domain. `/api/status` reports whether training storage is online and which checkpoint version is active.
 
-The supplied EXEs were compiled for Windows x64 here and the CPU protocol was tested against a simulated website endpoint. **The live Vercel + Neon + Blob integration, actual Windows execution, and GPU training were not tested in this environment.** The executables contain Python bytecode and can be reverse-engineered.
+## Limits
 
-### Troubleshooting chat
+Ollama is a local model runtime, not a training quality level. AXON's student remains a small model (approximately 3.4 million parameters), far smaller than most capable open models. More training and more participating PCs can help, but do not guarantee monotonic improvement or ChatGPT/Ollama-model-class competence within days. Independent language-quality tests, data quality, sufficient compute, and larger model architectures would be needed for a competitive assistant.
 
-If chat returns a service error, first check `https://axonai-theta.vercel.app/api/status` and your Vercel Function logs. Enable AI Gateway for the correct project/team and verify its credits. If you configured a random string for `AI_GATEWAY_API_KEY`, remove it or replace it with a genuine key from Vercel AI Gateway, then redeploy. The server uses automatic OIDC when Vercel provides it, so a manual key is normally unnecessary. The ZIP does **not** contain an API key or create Vercel authentication on your behalf.
-
+Training jobs have queue and daily limits to protect cloud quotas. More volunteers cannot exceed those safety caps automatically. A local teacher may hallucinate; double-checking using the same model is not equivalent to two independent fact sources. Only train with datasets and models whose licenses and terms permit their use.

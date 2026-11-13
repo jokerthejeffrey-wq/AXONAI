@@ -1,10 +1,9 @@
-import {loadStudent,STILL_TRAINING,localBasics} from '../server/scratch-chat.js';
+import {loadStudent} from '../server/scratch-chat.js';
 import {scratchStream} from '../server/scratch-infer.js';
 import {memoryAdmit} from '../server/memory.js';
 let generating=false;
 import {identityAnswer,validateMessages} from '../server/config.js';
 import {originAllowed,parseChatBody,rateLimit,turnstileConfig,verifyTurnstile} from '../server/security.js';
-import {simpleArithmetic} from '../server/arithmetic.js';
 import {getQuality,inferFromStudent} from '../server/coordinator.js';
 
 function rejectRate(res,seconds,message){
@@ -27,8 +26,6 @@ export default async function handler(req,res){
   const last=messages.at(-1).content;
   const identity=identityAnswer(last);
   if(identity)return res.status(200).json({reply:identity,mode:'local-basic',model:'AXON AI'});
-  const arithmetic=simpleArithmetic(last);
-  if(arithmetic!==null)return res.status(200).json({reply:arithmetic,mode:'local-calculation',model:'AXON AI'});
   try{
     const quality=await getQuality();
     if(body.stream===true && Number(quality?.version)>0){
