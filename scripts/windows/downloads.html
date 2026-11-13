@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Training — AXON AI</title>
+  <link rel="stylesheet" href="/static/theme.css">
+  <script src="/static/theme.js" defer></script>
+  <style>
+    body{font:15px/1.6 Arial,Helvetica,sans-serif;margin:0}
+    main{max-width:880px;margin:52px auto;padding:24px}
+    a{color:inherit}
+    .back{font-size:13px;text-decoration:none;color:var(--muted)}
+    .back:hover{text-decoration:underline}
+    h1{font-size:clamp(34px,5vw,46px);font-weight:400;letter-spacing:-2px;margin:36px 0 32px}
+    .items{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(270px,1fr))}
+    .item{border:1px solid var(--border);padding:26px;border-radius:14px;display:flex;flex-direction:column;align-items:flex-start;min-height:196px}
+    .label{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+    h2{font-size:27px;font-weight:400;letter-spacing:-.7px;margin:13px 0 16px}
+    .dl{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;background:var(--fg,#fff);color:var(--bg,#111);border-radius:999px;padding:12px 22px;margin-top:auto;font-weight:600;font-size:14px;min-height:44px;box-sizing:border-box}
+    .dl:hover{opacity:.82}
+    @media(max-width:600px){main{margin:20px auto;padding:20px}.item{min-height:176px}}
+  </style>
+<link rel="stylesheet" href="/static/responsive.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="/">← AXON AI</a>
+    <h1>Training workers</h1>
+    <div class="items">
+      <section class="item" id="cpu">
+        <div class="label">Windows 64-bit</div>
+        <h2>CPU</h2>
+        <a class="dl" href="/downloads/CPU-AXON.exe" download="CPU-AXON.exe">Download CPU ↓</a>
+      </section>
+      <section class="item" id="gpu">
+        <div class="label">NVIDIA · Windows 64-bit</div>
+        <h2>GPU</h2>
+        <a class="dl" href="/downloads/GPU-AXON.exe" download="GPU-AXON.exe">Download GPU ↓</a>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

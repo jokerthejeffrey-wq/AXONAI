@@ -1,0 +1,54 @@
+name: Build and publish CPU GPU executables
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/axon-exe.yml'
+      - 'scripts/windows/**'
+      - 'trainer/**'
+      - 'student.py'
+      - 'settings.py'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: axon-windows-exe
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - name: Compile and verify both console executables
+        run: python scripts/windows/build.py
+      - name: Verify bundled bytecode entry point
+        shell: pwsh
+        run: |
+          $payload = Get-ChildItem "$env:LOCALAPPDATA/AXONAI" -Directory -Filter 'app-*' | Select-Object -First 1
+          python "$($payload.FullName)/trainer/start.pyc" --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish only tested executables
+        shell: pwsh
+        run: |
+          git fetch origin main
+          $head = git rev-parse origin/main
+          if ($head -ne '${{ github.sha }}') { throw 'Main changed during the build. Re-run against current main.' }
+          Copy-Item exe-build/CPU-AXON.exe public/downloads/CPU-AXON.exe -Force
+          Copy-Item exe-build/GPU-AXON.exe public/downloads/GPU-AXON.exe -Force
+          Copy-Item exe-build/CPU-AXON.exe CPU-AXON.exe -Force
+          Copy-Item exe-build/GPU-AXON.exe GPU-AXON.exe -Force
+          Copy-Item scripts/windows/downloads.html public/downloads.html -Force
+          $lines = @('CPU-AXON.exe','GPU-AXON.exe') | ForEach-Object { $h=(Get-FileHash "public/downloads/$_" -Algorithm SHA256).Hash.ToLower(); "$h  $_" }
+          [IO.File]::WriteAllLines((Join-Path $pwd 'public/downloads/SHA256SUMS.txt'),$lines)
+          git rm --ignore-unmatch public/downloads/AXON-Conversational-Trainer.zip
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add public/downloads.html public/downloads/CPU-AXON.exe public/downloads/GPU-AXON.exe public/downloads/SHA256SUMS.txt CPU-AXON.exe GPU-AXON.exe
+          git commit -m 'Publish conversational CPU/GPU EXEs and remove ZIP download'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git push origin HEAD:main
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
