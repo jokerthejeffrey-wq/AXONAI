@@ -82,7 +82,7 @@ def prepare_environment(gpu, repair):
         run_setup_step('Installing conversation trainer dependencies.', [*pip, '-r', str(REQUIREMENTS)])
         run_setup_step('Checking package compatibility.', [str(python), '-m', 'pip', 'check'])
         expected_cuda = '12.8' if gpu else None
-        check = ('import torch, datasets, psutil, requests, safetensors; '
+        check = ('import torch, pyarrow, psutil, requests, safetensors; '
                  'from transformers import Qwen2ForCausalLM; '
                  f'assert torch.version.cuda == {expected_cuda!r}; '
                  'assert torch.ones(1, device="cpu").item() == 1')

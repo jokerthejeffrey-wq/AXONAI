@@ -27,6 +27,48 @@ def canonical(row):
     if not training_context(row)[0]:return None
     return {'messages':messages}
 
+# Pinned train shard hashes preserve the original dataset record order.
+SHARDS = (
+    '498cd4580014f42c40cfde066573564ed28e3e1548a5566715b615f5ea932856',
+    '5412c03df579fc7dd7d06c7f5249627d99d0621882fb8f2cd5c13582eb2a80f6',
+    'aefcac6571abf275b4e1629baa01f326c0fe279d35cd0349b7439319923815a7',
+    'c15edfca888c9924a626dad7b7f4e9f08d8f406f997ac13be46bc9be0a6192db',
+)
+
+def dataset_rows(folder):
+    import requests
+    import pyarrow.parquet as parquet
+    import tempfile
+    for index, expected in enumerate(SHARDS):
+        name = f'train-{index:05d}-of-00004.parquet'
+        url = f'https://huggingface.co/datasets/{DATASET}/resolve/{REVISION}/data/{name}'
+        print(f'Downloading training data shard {index + 1}/4…', flush=True)
+        with tempfile.TemporaryDirectory(prefix='axon-data-', dir=folder) as temp:
+            path = Path(temp) / name
+            digest = hashlib.sha256()
+            downloaded = 0
+            next_update = 16 * 1024 * 1024
+            with requests.get(url, stream=True, timeout=(20, 120)) as response:
+                response.raise_for_status()
+                with path.open('wb') as output:
+                    for block in response.iter_content(1024 * 1024):
+                        if block:
+                            output.write(block)
+                            digest.update(block)
+                            downloaded += len(block)
+                            if downloaded >= next_update:
+                                print(f'Downloaded {downloaded // (1024 * 1024)} MB of shard {index + 1}/4', flush=True)
+                                next_update += 16 * 1024 * 1024
+            if digest.hexdigest() != expected:
+                raise RuntimeError(f'Data checksum failed for {name}. Retry the download.')
+            reader = parquet.ParquetFile(path)
+            try:
+                for batch in reader.iter_batches(batch_size=256, columns=['messages']):
+                    yield from batch.to_pylist()
+            finally:
+                reader.close()
+
+
 def _prepare(folder,source=None,target_bytes=TARGET_BYTES):
     folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
     meta=folder/'corpus.json';txt=folder/'training.txt';dbpath=folder/'index.sqlite'
@@ -40,8 +82,7 @@ def _prepare(folder,source=None,target_bytes=TARGET_BYTES):
             return info
         raise RuntimeError('Corpus cache mismatch. Use a new cache directory; existing files were preserved.')
     if source is None:
-        from datasets import load_dataset
-        source=load_dataset(DATASET,split='train',revision=REVISION,streaming=True)
+        source=dataset_rows(folder)
     # A partial build is safely reconstructed. Completion is indicated only by corpus.json.
     db=sqlite3.connect(dbpath)
     db.execute('DROP TABLE IF EXISTS records')
