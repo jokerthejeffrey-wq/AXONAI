@@ -72,13 +72,6 @@ function logGatewayFailure(error) {
     status:status(error?.statusCode || error?.status || error?.response?.status),
     causeName:safe(first?.name),causeCode:safe(first?.code),
     causeStatus:status(first?.statusCode || first?.status),
-    // Temporarily log a short redacted SDK diagnostic for the current outage.
-    // Never log URLs, bearer tokens, credentials, or long opaque strings.
-    hint: String(error?.name)==='GatewayError' ? String(error?.message||'')
-      .replace(/https?:\/\/\S+/gi,'[url]')
-      .replace(/(?:sk-|Bearer\s+)[^\s,;]+/gi,'[credential]')
-      .replace(/\b[A-Za-z0-9_-]{22,}\b/g,'[redacted]')
-      .slice(0,220) : '',
     providerCode,providerType
   }));
 }
@@ -110,6 +103,7 @@ export async function gatewayGenerate(messages, _req, {
     {role:'system', content:SYSTEM},
     ...messages.slice(-11).map(m=>({role:m.role,content:m.content}))
   ];
+  let gatewayRejection = '';
   try {
     const sdk = generateTextFn ? null : await import('ai');
     const generateText = generateTextFn || sdk.generateText;
@@ -131,12 +125,12 @@ export async function gatewayGenerate(messages, _req, {
             category=String(body?.error?.code||body?.error?.type||body?.code||'')
               .replace(/[^a-zA-Z0-9_-]/g,'').slice(0,55);
           } catch {}
+          gatewayRejection = category;
           console.error('AXON Gateway HTTP failure',response.status,category);
         }
         return response;
       }
     })(model) : model;
-    if (!generateTextFn) console.info('AXON AI gateway auth',useOidc?'vercel-oidc':(env.AI_GATEWAY_API_KEY?'manual-key':'not-configured'));
     const options = {
       model:preferredModel,
       messages:chat,
@@ -160,6 +154,9 @@ export async function gatewayGenerate(messages, _req, {
     return answer;
   } catch (error) {
     if (!(error instanceof GatewayError)) logGatewayFailure(error);
+    if (gatewayRejection === 'customer_verification_required') {
+      throw new GatewayError('AI Gateway account verification is required.','verification_required');
+    }
     throw classifyGatewayError(error);
   }
 }
