@@ -3,21 +3,41 @@ export const CHUNK_BYTES=2_500_000; // below Vercel's 4.5 MB request limit
 export const MAX_CHECKPOINT=32*1024*1024;
 export const BATCH=8;
 export const MANIFEST={protocol:2,architecture:{vocab_size:260,width:256,layers:4,heads:8,context:512},tokenizer:'utf8-bytes-v1',max_uses:1};
-export function lesson(n) {
+// Deterministic curriculum: each global index is reserved once in Neon.
+// No vendor model/API is required, and no personal chat data is used.
+export const CURRICULUM_VERSION=3;
+export function lesson(n){
+  if(!Number.isSafeInteger(n)||n<0)throw Error('Invalid lesson index');
   if(n===0)return {concept:'greeting',messages:[{role:'user',content:'hello'}],response:'Hello!'};
-  const op=(n-1)%9, k=Math.floor((n-1)/9)+2;
-  const cases=[
-    ['addition',`What is ${k} + ${k+3}?`,String(2*k+3)],
-    ['subtraction',`Calculate ${k+20} minus ${k}.`,'20'],
-    ['multiplication',`What is ${k} times 7?`,String(k*7)],
-    ['parity',`Is ${k} an even or odd number?`,k%2?'odd':'even'],
-    ['comparison',`Which is larger, ${k+1} or ${k+2}?`,String(k+2)],
-    ['division',`What is ${k*3} divided by 3?`,String(k)],
-    ['unit conversion',`How many centimeters are in ${k} meters?`,String(k*100)],
-    ['square',`What is ${k} squared?`,String(k*k)],
-    ['binary',`Write ${k} in binary.`,k.toString(2)],
+  const op=(n-1)%24, k=Math.floor((n-1)/24)+2;
+  const b=(k*7)%113+3, c=(k*11)%97+2, small=k%50+2;
+  const choices=[
+    ['context greeting',`Hi! My event starts in ${k} minutes. Say hello.`,`Hello! I hope your event goes well.`],
+    ['addition',`What is ${k} plus ${b}?`,String(k+b)],
+    ['subtraction',`Calculate ${k+b} minus ${b}.`,String(k)],
+    ['multiplication',`What is ${k} times ${small}?`,String(k*small)],
+    ['division',`Divide ${k*small} by ${small}.`,String(k)],
+    ['even odd',`Is ${k} even or odd?`,k%2?'odd':'even'],
+    ['comparison',`Which is greater, ${k} or ${k+b}?`,String(k+b)],
+    ['squared',`What is ${k} squared?`,String(k*k)],
+    ['decimal',`Write ${k} as a decimal integer.`,String(k)],
+    ['centimeters',`How many centimeters in ${k} meters?`,String(k*100)],
+    ['minutes',`How many minutes are ${k} hours?`,String(k*60)],
+    ['weight',`How many grams are ${k} kilograms?`,String(k*1000)],
+    ['remainder',`What is ${k*small+b} mod ${small}?`,String(b%small)],
+    ['double',`What is twice ${k}?`,String(k*2)],
+    ['triple',`What is three times ${k}?`,String(k*3)],
+    ['sequence',`Continue: ${k}, ${k+b}, ${k+2*b}, ...`,String(k+3*b)],
+    ['difference',`What is the difference between ${k+b} and ${k}?`,String(b)],
+    ['order of operations',`Evaluate ${k} + ${b} * 2.`,String(k+b*2)],
+    ['comparison',`Is ${k} smaller than ${k+c}?`,'Yes.'],
+    ['binary',`Write decimal ${k} in binary.`,k.toString(2)],
+    ['rounding',`Round ${k*10+b} to the nearest ten.`,String(Math.round((k*10+b)/10)*10)],
+    ['digits',`How many digits are in the number ${k}?`,String(String(k).length)],
+    ['percentage',`What is 10% of ${k*10}?`,String(k)],
+    ['conditional',`If there are ${k} apples and you add ${b}, how many?`,String(k+b)]
   ];
-  const [concept,content,response]=cases[op];
+  const [concept,content,response]=choices[op];
   return {concept,messages:[{role:'user',content}],response};
 }
 export function makeLessons(start){return Array.from({length:BATCH},(_,i)=>lesson(start+i));}
