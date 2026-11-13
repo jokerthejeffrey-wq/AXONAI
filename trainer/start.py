@@ -7,7 +7,7 @@ import time
 import venv
 from contextlib import contextmanager
 
-TRAINER_VERSION = 'numpy-v1'
+TRAINER_VERSION = 'full-grad-v2'
 ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS = ROOT / 'trainer' / 'requirements.txt'
 
@@ -80,9 +80,10 @@ def prepare_environment(gpu, repair, teacher=False):
         steps=[]
         if not python.is_file(): steps.append(('Python environment', 8))
         if not healthy:steps.append(('Trainer packages', 95))
-        if gpu and not healthy:steps.append(('GPU packages', 95))
+        # The CUDA PyTorch runtime replaces the separate CuPy package.
+        if not healthy: steps.append(('Full-gradient AI runtime', 160))
         if teacher and (repair or not teacher_ready):
-            steps += [('Local teacher runtime', 150),('Local teacher packages', 65)]
+            steps.append(('Local pretrained reviewer', 65))
         steps += [('Package verification', 8),('Runtime verification', 8)]
         meter=SetupProgress(steps)
         logfile=folder/'setup.log'
@@ -99,21 +100,18 @@ def prepare_environment(gpu, repair, teacher=False):
         if not healthy:
             stamp.unlink(missing_ok=True)
             run_setup_step('Trainer packages', [*pip, '-r', str(REQUIREMENTS)],meter,95,logfile)
-            if gpu:
-                run_setup_step('GPU packages', [*pip, 'cupy-cuda12x==13.5.1'],meter,95,logfile)
+            index = 'https://download.pytorch.org/whl/cu128' if gpu else 'https://download.pytorch.org/whl/cpu'
+            run_setup_step('Full-gradient AI runtime', [*pip, '--index-url', index, 'torch==2.7.1'],meter,160,logfile)
             stamp.write_text(fingerprint + '\n')
         if teacher and (repair or not teacher_ready):
             optional_stamp.unlink(missing_ok=True)
-            # Teacher is CPU-only so it can coexist with NumPy/CuPy on volunteers.
-            run_setup_step('Local teacher runtime',[*pip, '--index-url',
-                'https://download.pytorch.org/whl/cpu','torch==2.7.1'],meter,150,logfile)
-            run_setup_step('Local teacher packages',[*pip,'-r',
+            run_setup_step('Local pretrained reviewer',[*pip,'-r',
                 str(ROOT/'trainer'/'requirements-teacher.txt')],meter,65,logfile)
             optional_stamp.write_text(teacher_fingerprint + '\n')
         run_setup_step('Package verification',[str(python),'-m','pip','check'],meter,8,logfile)
-        check='import numpy, pyarrow, psutil, requests, safetensors'
-        if gpu:check+='; import cupy; assert cupy.cuda.runtime.getDeviceCount() > 0'
-        if teacher:check+='; import torch, transformers'
+        check='import numpy, pyarrow, psutil, requests, safetensors, torch, transformers'
+        if gpu:check+='; assert torch.cuda.is_available(), "CUDA GPU unavailable"'
+
         run_setup_step('Runtime verification',[str(python),'-c',check],meter,8,logfile)
         meter.finish()
         print('Dependency setup complete.', flush=True)
@@ -127,13 +125,13 @@ def main():
         return 0
     gpu = '--gpu' in args
     try:
-        python = prepare_environment(gpu, '--repair' in args, teacher='--teacher-check' in args)
+        python = prepare_environment(gpu, '--repair' in args, teacher=True)
         if '--install-only' in args:
             return 0
         entry = ROOT / 'trainer' / 'run.py'
         if not entry.exists():
             entry = entry.with_suffix('.pyc')
-        options = [arg for arg in args if arg not in ('--gpu', '--repair')]
+        options = [arg for arg in args if arg not in ('--gpu', '--repair', '--teacher-check')]
         return subprocess.run([str(python), '-u', str(entry), '--device', 'cuda' if gpu else 'cpu', *options]).returncode
     except KeyboardInterrupt:
         print('\nSetup stopped. Open the trainer again to resume with the cached downloads.', flush=True)
