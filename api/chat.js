@@ -1,4 +1,4 @@
-import {loadStudent,STILL_TRAINING,localBasics} from '../server/scratch-chat.js';
+import {loadStudent} from '../server/scratch-chat.js';
 import {scratchStream} from '../server/scratch-infer.js';
 import {memoryAdmit} from '../server/memory.js';
 let generating=false;
