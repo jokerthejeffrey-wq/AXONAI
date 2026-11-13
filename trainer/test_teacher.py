@@ -31,6 +31,23 @@ class ReviewerTests(unittest.TestCase):
         self.assertEqual(len(history),3)
         self.assertEqual(row['response'],'Paris.')
 
+    def test_original_source_also_needs_two_passes(self):
+        for decisions,expected,calls in [
+            (['PASS','PASS'],True,2),
+            (['FAIL','PASS'],False,1),
+            (['PASS','FAIL'],False,2),
+        ]:
+            with self.subTest(decisions=decisions):
+                teacher=object.__new__(Teacher)
+                results=iter(decisions)
+                invocations=[]
+                def respond(system,user,max_new_tokens=120):
+                    invocations.append((system,user))
+                    return next(results)
+                teacher._ask=respond
+                self.assertEqual(teacher.review_source(self.sample()),expected)
+                self.assertEqual(len(invocations),calls)
+
     def test_each_reviewer_can_reject(self):
         for decisions,count in [(('FAIL','PASS'),2),(('PASS','FAIL'),3)]:
             with self.subTest(decisions=decisions):
