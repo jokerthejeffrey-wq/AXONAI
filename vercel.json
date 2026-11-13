@@ -4,10 +4,12 @@
   "outputDirectory": "public",
   "functions": {
     "api/chat.js": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "public/model/**"
     },
     "api/admin-review.js": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "public/model/**"
     },
     "api/update.js": {
       "maxDuration": 60
@@ -16,7 +18,8 @@
       "maxDuration": 60
     },
     "api/job.js": {
-      "maxDuration": 300
+      "maxDuration": 300,
+      "includeFiles": "public/model/**"
     }
   },
   "rewrites": [

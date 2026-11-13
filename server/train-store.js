@@ -47,7 +47,7 @@ export async function publicStatus(){
   try{
     const sql=await db();
     const [v]=await sql`SELECT val FROM axon_meta WHERE key='version'`;
-    const [l]=await sql`SELECT val FROM axon_meta WHERE key='sequence'`;
+    const [l]=await sql`SELECT coalesce(sum(val),0) AS val FROM axon_meta WHERE key IN ('sequence','corpus_sequence')`;
     const [p]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
     return {ok:true,training_available:true,version:Number(v?.val||0),reserved_lessons:Number(l?.val||0),pending_updates:Number(p?.n||0),queue_capacity:PENDING_QUEUE_LIMIT,queue_full:Number(p?.n||0)>=PENDING_QUEUE_LIMIT};
   }catch(e){

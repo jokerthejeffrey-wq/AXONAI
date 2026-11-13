@@ -34,3 +34,7 @@ The student is only about 3.4 million parameters with short context. This change
 `npm test` covers sampling, actual checkpoint streaming, memory, API/security and previous regressions. `python -m unittest trainer.test_corpus` covers deterministic cache, deduplication, no padding, and multi-turn extraction. These are functionality tests, not proof of language quality.
 
 Actual smoke verification: downloaded a 19-conversation sample from the pinned dataset; downloaded and ran the local Qwen teacher; trained the full student for one step and verified that its weights changed. GPU operation and Windows launchers have not been tested here.
+
+Full corpus verification: 999,994,848 bytes (approximately 1 GB), 213,571 deduplicated conversation records. This is the measured dataset size, not 15 million examples. Data readers are pinned and iterators explicitly closed to avoid a native-library shutdown error observed with newer unpinned dependencies.
+
+Live integration test: reserved records 0–7 from the deployed coordinator, generated teacher targets, trained all 8 examples, downloaded checkpoint v1, and uploaded the result successfully for validation. This submission was not manually forced into production weights. The production chat endpoint also returned HTTP 200 NDJSON with student-version metadata, text deltas and completion.

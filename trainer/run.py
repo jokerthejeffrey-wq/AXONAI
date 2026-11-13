@@ -46,7 +46,8 @@ def main():
             arch=job['manifest']['architecture']
             if arch!=model.config:raise RuntimeError('Student architecture mismatch')
             rows=[]
-            for raw in read_rows(args.cache,assignment['start'],assignment['count']):
+            for offset,raw in enumerate(read_rows(args.cache,assignment['start'],assignment['count'])):
+                print(f"Teacher preparing record {assignment['start']+offset+1}…",flush=True)
                 wait(256);row=teacher.lesson(raw)
                 if row:rows.append(row)
             if not rows:print('No safe short examples in this reservation; skipping without replay.');continue

@@ -1,5 +1,5 @@
 """Disk-backed, deterministic conversation corpus. Never pad with duplicate lines."""
-import hashlib,json,sqlite3,os
+import hashlib,json,sqlite3,os,gc
 from pathlib import Path
 DATASET='HuggingFaceTB/smol-smoltalk'
 REVISION='2ca82d2fe63c017af8d4cb30e81e95cb25516851'
@@ -27,7 +27,7 @@ def canonical(row):
     if not training_context(row)[0]:return None
     return {'messages':messages}
 
-def prepare(folder,source=None,target_bytes=TARGET_BYTES):
+def _prepare(folder,source=None,target_bytes=TARGET_BYTES):
     folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
     meta=folder/'corpus.json';txt=folder/'training.txt';dbpath=folder/'index.sqlite'
     if meta.exists() and txt.exists() and dbpath.exists():
@@ -46,10 +46,10 @@ def prepare(folder,source=None,target_bytes=TARGET_BYTES):
     db=sqlite3.connect(dbpath)
     db.execute('DROP TABLE IF EXISTS records')
     db.execute('CREATE TABLE records(id INTEGER PRIMARY KEY, offset INTEGER, size INTEGER, fingerprint TEXT UNIQUE)')
-    count=size=0;digest=hashlib.sha256()
+    count=size=0;digest=hashlib.sha256();iterator=iter(source)
     try:
         with txt.open('wb') as f:
-            for raw in source:
+            for raw in iterator:
                 row=canonical(raw)
                 if row is None:continue
                 # Deduplicate whole user contexts even if the source changes the answer.
@@ -62,7 +62,12 @@ def prepare(folder,source=None,target_bytes=TARGET_BYTES):
                 size+=len(data);count+=1
                 if count%1000==0:db.commit();print(f'Corpus: {count:,} conversations, {size/1e6:.1f} MB',flush=True)
         db.commit()
-    finally:db.close()
+    finally:
+        db.close()
+        close=getattr(iterator,'close',None)
+        if close:close()
+        del iterator,source
+        gc.collect()
     info={'id':CORPUS_ID,'dataset':DATASET,'revision':REVISION,'target_bytes':target_bytes,'bytes':size,'records':count,'lines':count,'sha256':digest.hexdigest()}
     temp=meta.with_suffix('.tmp');temp.write_text(json.dumps(info,indent=2));temp.replace(meta)
     print(f"Corpus ready: {count:,} distinct conversations, {size:,} bytes. This is NOT 15 million examples.",flush=True)
@@ -77,3 +82,12 @@ def read_rows(folder,start,count):
             if entry is None:raise RuntimeError('Corpus range exhausted or cache incomplete')
             f.seek(entry[0]);rows.append(json.loads(f.read(entry[1])))
         return rows
+
+
+def prepare(folder,source=None,target_bytes=TARGET_BYTES):
+    if source is not None:return _prepare(folder,source,target_bytes)
+    from filelock import FileLock
+    folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
+    # CPU and GPU launches on the same PC must not write the same cache concurrently.
+    with FileLock(str(folder/'corpus.lock'),timeout=3600):
+        return _prepare(folder,None,target_bytes)
