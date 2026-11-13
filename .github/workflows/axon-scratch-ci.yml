@@ -1,7 +1,7 @@
 name: AXON scratch local chat tests
 on:
   push:
-    branches: [axon-scratch-local-only]
+    branches: [main, axon-scratch-local-only, fix-training-queue-mobile-nov13]
   workflow_dispatch:
 
 permissions:

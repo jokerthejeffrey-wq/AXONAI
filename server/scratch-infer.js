@@ -128,3 +128,25 @@ export function scratchGenerate(checkpoint,messages,{maxNewTokens=48}={}){
   }
   try{return decoder.decode(Uint8Array.from(out)).trim();}catch{return '';}
 }
+
+
+// A bounded next-byte validation score. Used to reject obviously regressive
+// training updates before they are merged into the community candidate.
+export function scoreNextByte(modelOrBytes,messages,expectedByte){
+  if(!Number.isInteger(expectedByte)||expectedByte<0||expectedByte>255)throw Error('Invalid target byte');
+  const model=Buffer.isBuffer(modelOrBytes)?parseCheckpoint(modelOrBytes):modelOrBytes;
+  const cache=model.layers.map(()=>({k:[],v:[]})),ids=encodeMessages(messages,{maxInputTokens:128});
+  let logits;
+  for(const token of ids)logits=logitsForToken(model,token,cache);
+  let largest=-Infinity;
+  for(let i=0;i<logits.length;i++)if(Number.isFinite(logits[i])&&logits[i]>largest)largest=logits[i];
+  if(!Number.isFinite(largest))throw Error('Invalid model predictions');
+  let denominator=0;
+  for(let i=0;i<logits.length;i++){
+    if(!Number.isFinite(logits[i]))throw Error('Invalid model predictions');
+    denominator+=Math.exp(logits[i]-largest);
+  }
+  const loss=largest+Math.log(denominator)-logits[expectedByte];
+  if(!Number.isFinite(loss)||loss<0||loss>1000)throw Error('Invalid validation loss');
+  return loss;
+}

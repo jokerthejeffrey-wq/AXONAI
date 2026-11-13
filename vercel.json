@@ -14,6 +14,9 @@
     },
     "api/update-part.js": {
       "maxDuration": 60
+    },
+    "api/job.js": {
+      "maxDuration": 300
     }
   },
   "rewrites": [
