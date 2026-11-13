@@ -54,6 +54,9 @@ def main():
                 wait(256)
                 from trainer.corpus import training_context
                 context, answer = training_context(raw)
+                if not teacher.review_source(raw):
+                    print('  Original record failed two review checks; skipped.',flush=True)
+                    continue
                 budget = 509 - sum(len(m['content'].encode()) + 2 for m in context)
                 if context and answer and budget > 24:
                     if len(answer.encode()) > budget:
