@@ -1,0 +1,37 @@
+name: AXON AI training health
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-training:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify production training API
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, sys, time, urllib.request
+          url = 'https://axonai-theta.vercel.app/api/status'
+          for attempt in range(1, 11):
+              try:
+                  request = urllib.request.Request(url, headers={'Cache-Control':'no-cache','User-Agent':'AXONAI-Healthcheck/1.0'})
+                  with urllib.request.urlopen(request, timeout=16) as response:
+                      data = json.load(response)
+                  enabled = data.get('training_available') is True
+                  print(f'Attempt {attempt}: http=200, api_ok={data.get("ok")}, training_available={enabled}', flush=True)
+                  if enabled:
+                      print('AXON AI training API is ready.')
+                      sys.exit(0)
+              except Exception as error:
+                  print(f'Attempt {attempt}: health check failed ({type(error).__name__})', flush=True)
+              if attempt < 10:
+                  time.sleep(12)
+          print('Training API not available after 10 attempts.', flush=True)
+          sys.exit(1)
+          PY
