@@ -9,6 +9,9 @@ from contextlib import contextmanager
 
 TRAINER_VERSION = 'full-grad-v2'
 ROOT = Path(__file__).resolve().parents[1]
+# Directly executing a compiled trainer/start.pyc does not put the payload root
+# on sys.path. The Windows EXE bundles trainer/*.pyc without .py sources.
+sys.path.insert(0, str(ROOT))
 REQUIREMENTS = ROOT / 'trainer' / 'requirements.txt'
 
 
