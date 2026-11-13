@@ -1,10 +1,44 @@
 """Disk-backed, deterministic conversation corpus. Never pad with duplicate lines."""
-import hashlib,json,sqlite3,os,gc
+import hashlib,json,sqlite3,os,gc,time
 from pathlib import Path
 DATASET='HuggingFaceTB/smol-smoltalk'
 REVISION='2ca82d2fe63c017af8d4cb30e81e95cb25516851'
 CORPUS_ID='smoltalk-v1'
 TARGET_BYTES=1_000_000_000
+
+class Progress:
+    """Single-line progress based on bytes processed since the start."""
+    def __init__(self, label, total):
+        self.label = label
+        self.total = total
+        self.start = time.monotonic()
+        self.last_update = 0
+        self.width = 0
+        self.shown = False
+
+    def update(self, current, force=False):
+        now = time.monotonic()
+        if not force and now - self.last_update < 1:
+            return
+        self.last_update = now
+        percent = min(100, max(0, int(100 * current / self.total)))
+        filled = percent // 5
+        elapsed = now - self.start
+        if current > 0 and elapsed >= 2:
+            seconds = max(0, int((self.total - current) * elapsed / current))
+            eta = f'~{seconds // 60}m {seconds % 60}s' if seconds >= 60 else f'~{seconds}s'
+        else:
+            eta = 'estimating'
+        line = f'{self.label} [{"=" * filled}{" " * (20 - filled)}] {percent}% ETA {eta}'
+        print('\r' + line.ljust(self.width), end='', flush=True)
+        self.width = len(line)
+        self.shown = True
+
+    def finish(self):
+        if self.shown:
+            print(flush=True)
+            self.shown = False
+
 
 def training_context(row):
     history=[];target=''
@@ -35,19 +69,21 @@ SHARDS = (
     'c15edfca888c9924a626dad7b7f4e9f08d8f406f997ac13be46bc9be0a6192db',
 )
 
-def dataset_rows(folder):
+def dataset_rows(folder, corpus_progress=None):
     import requests
     import pyarrow.parquet as parquet
     import tempfile
     for index, expected in enumerate(SHARDS):
         name = f'train-{index:05d}-of-00004.parquet'
         url = f'https://huggingface.co/datasets/{DATASET}/resolve/{REVISION}/data/{name}'
+        if corpus_progress:
+            corpus_progress.finish()
         print(f'Downloading training data shard {index + 1}/4…', flush=True)
         with tempfile.TemporaryDirectory(prefix='axon-data-', dir=folder) as temp:
             path = Path(temp) / name
             digest = hashlib.sha256()
             downloaded = 0
-            next_update = 16 * 1024 * 1024
+            download_progress = Progress('Download', (229710350, 230298184, 230587255, 231879938)[index])
             with requests.get(url, stream=True, timeout=(20, 120)) as response:
                 response.raise_for_status()
                 with path.open('wb') as output:
@@ -56,9 +92,9 @@ def dataset_rows(folder):
                             output.write(block)
                             digest.update(block)
                             downloaded += len(block)
-                            if downloaded >= next_update:
-                                print(f'Downloaded {downloaded // (1024 * 1024)} MB of shard {index + 1}/4', flush=True)
-                                next_update += 16 * 1024 * 1024
+                            download_progress.update(downloaded)
+            download_progress.update(downloaded, force=True)
+            download_progress.finish()
             if digest.hexdigest() != expected:
                 raise RuntimeError(f'Data checksum failed for {name}. Retry the download.')
             reader = parquet.ParquetFile(path)
@@ -81,8 +117,9 @@ def _prepare(folder,source=None,target_bytes=TARGET_BYTES):
             if digest.hexdigest()!=info['sha256']:raise RuntimeError('Corpus checksum failed; use a new cache directory.')
             return info
         raise RuntimeError('Corpus cache mismatch. Use a new cache directory; existing files were preserved.')
+    progress=Progress('Corpus', target_bytes)
     if source is None:
-        source=dataset_rows(folder)
+        source=dataset_rows(folder, progress)
     # A partial build is safely reconstructed. Completion is indicated only by corpus.json.
     db=sqlite3.connect(dbpath)
     db.execute('DROP TABLE IF EXISTS records')
@@ -101,9 +138,12 @@ def _prepare(folder,source=None,target_bytes=TARGET_BYTES):
                 if size+len(data)>target_bytes:break
                 db.execute('INSERT INTO records VALUES(?,?,?,?)',(count,size,len(data),key));f.write(data);digest.update(data)
                 size+=len(data);count+=1
-                if count%1000==0:db.commit();print(f'Corpus: {count:,} conversations, {size/1e6:.1f} MB',flush=True)
+                if count%1000==0:
+                    db.commit()
+                    progress.update(size)
         db.commit()
     finally:
+        progress.finish()
         db.close()
         close=getattr(iterator,'close',None)
         if close:close()
@@ -111,7 +151,7 @@ def _prepare(folder,source=None,target_bytes=TARGET_BYTES):
         gc.collect()
     info={'id':CORPUS_ID,'dataset':DATASET,'revision':REVISION,'target_bytes':target_bytes,'bytes':size,'records':count,'lines':count,'sha256':digest.hexdigest()}
     temp=meta.with_suffix('.tmp');temp.write_text(json.dumps(info,indent=2));temp.replace(meta)
-    print(f"Corpus ready: {count:,} distinct conversations, {size:,} bytes. This is NOT 15 million examples.",flush=True)
+    print(f"Corpus ready: {count:,} conversations, {size:,} bytes.",flush=True)
     return info
 
 def read_rows(folder,start,count):
