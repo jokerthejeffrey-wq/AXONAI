@@ -35,8 +35,7 @@ export function localBasics(text){
 }
 export const STILL_TRAINING='AXON AI is still learning. I cannot answer that reliably yet.';
 export async function scratchAnswer(messages,quality,{load=loadStudent,generate=scratchGenerate}={}){
-  const version=Number(quality?.version||0),basic=localBasics(messages.at(-1).content);
-  if(basic&&version===0)return {reply:basic,mode:'local-basic',version};
+  const version=Number(quality?.version||0);
   if(!Number.isSafeInteger(version)||version<0)return {reply:STILL_TRAINING,mode:'learning',version:0};
   try{
     const model=await load(version);
