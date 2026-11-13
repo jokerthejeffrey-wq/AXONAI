@@ -24,26 +24,9 @@ test('Deployment has no old pretrained weights or runtime',()=>{
  assert.ok(!Object.keys(pkg.dependencies||{}).some(n=>/transformers|torch|onnx/i.test(n)));
 });
 
-test('Chat missing gateway credentials returns actionable error without pretending success',async()=>{
- const old=process.env.AI_GATEWAY_API_KEY,oldOidc=process.env.VERCEL_OIDC_TOKEN,oldV=process.env.VERCEL;
- try{
-   delete process.env.AI_GATEWAY_API_KEY;delete process.env.VERCEL_OIDC_TOKEN;delete process.env.VERCEL;
-   const res=response();
-   await chat({method:'POST',headers:{},body:{messages:[{role:'user',content:'hello again'}]}},res);
-   assert.equal(res.code,503);
-   assert.equal(res.body.code,'auth_missing');
-   assert.match(res.body.error,/temporarily unavailable/);
-   assert.equal(res.body.reply,undefined);
- }finally{
-   if(old===undefined)delete process.env.AI_GATEWAY_API_KEY;else process.env.AI_GATEWAY_API_KEY=old;
-   if(oldOidc===undefined)delete process.env.VERCEL_OIDC_TOKEN;else process.env.VERCEL_OIDC_TOKEN=oldOidc;
-   if(oldV===undefined)delete process.env.VERCEL;else process.env.VERCEL=oldV;
- }
-});
-
-test('Status shows hosted model, never an installed local model',async()=>{
+test('Status shows from-scratch model, never a gateway dependency',async()=>{
  const res=response();await status({method:'GET',headers:{}},res);
  assert.equal(res.code,200);
- assert.equal(res.body.local_model_installed,false);
- assert.equal(typeof res.body.chat_credentials_present,'boolean');
+ assert.equal(res.body.local_model_installed,true);
+ assert.equal(res.body.chat_requires_gateway,false);
 });
