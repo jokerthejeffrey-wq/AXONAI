@@ -54,6 +54,9 @@ export default async function handler(req,res) {
     if (code==='auth_missing' || code==='auth_rejected' || code==='access_denied') return res.status(503).json({
       error:'Chat is temporarily unavailable. Please try again later.',code
     });
+    if (code==='verification_required') return res.status(503).json({
+      error:'Chat is temporarily unavailable. Please try again later.',code
+    });
     if (code==='billing') return res.status(503).json({
       error:'Chat credits are unavailable. The site owner must check AI Gateway billing.',code
     });
