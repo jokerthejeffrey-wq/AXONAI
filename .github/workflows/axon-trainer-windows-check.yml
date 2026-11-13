@@ -8,7 +8,7 @@ permissions:
 jobs:
   windows-exes:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -36,3 +36,12 @@ jobs:
               if ($names -notcontains $item) { throw "Missing packed file: $item" }
             }
           } finally { $z.Dispose() }
+      - name: Install CPU dependencies and test actual model training
+        shell: pwsh
+        run: |
+          & ./exe-build/CPU-AXON.exe --install-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $payload = Get-ChildItem "$env:LOCALAPPDATA/AXONAI" -Directory -Filter 'app-*' | Select-Object -First 1
+          $runtime = "$env:LOCALAPPDATA/AXONAI/environments/python312-cpu/Scripts/python.exe"
+          & $runtime -B scripts/windows/smoke_train.py $payload.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
