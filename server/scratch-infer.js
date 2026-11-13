@@ -109,7 +109,30 @@ export function encodeMessages(messages,{maxInputTokens=192}={}){
   if(tokens.length>maxInputTokens)throw Error('Message too long for the scratch model');
   return tokens;
 }
-export function scratchGenerate(checkpoint,messages,{maxNewTokens=48}={}){
+export function sampleToken(logits,{temperature=0.8,topK=32,used=[] ,random=Math.random}={}){
+  if(!Number.isFinite(temperature)||temperature<0.05||temperature>3)throw Error('Invalid temperature');
+  if(!Number.isInteger(topK)||topK<1||topK>V)throw Error('Invalid topK');
+  const recent=new Map();
+  for(const token of used.slice(-50))recent.set(token,(recent.get(token)||0)+1);
+  const candidates=[];
+  for(let i=0;i<V;i++){
+    if(i===PAD||i===USER||i===ASSISTANT||!Number.isFinite(logits[i]))continue;
+    const penalty=Math.min(1.2,(recent.get(i)||0)*0.27);
+    candidates.push({id:i,score:logits[i]/temperature-penalty});
+  }
+  candidates.sort((a,b)=>b.score-a.score);
+  const selected=candidates.slice(0,topK),best=selected[0]?.score;
+  if(!Number.isFinite(best))throw Error('No usable token predictions');
+  let total=0;
+  for(const item of selected){item.mass=Math.exp(item.score-best);total+=item.mass}
+  if(!Number.isFinite(total)||total<=0)throw Error('Invalid prediction probabilities');
+  let r=Math.min(0.999999999,Math.max(0,Number(random())))*total;
+  for(const item of selected){r-=item.mass;if(r<0)return item.id}
+  return selected.at(-1).id;
+}
+export function scratchGenerate(checkpoint,messages,{
+  maxNewTokens=48,temperature=0.78,topK=32,random=Math.random,onToken
+}={}){
   if(!Number.isInteger(maxNewTokens)||maxNewTokens<1||maxNewTokens>128)throw Error('Invalid generation limit');
   const model=Buffer.isBuffer(checkpoint)?parseCheckpoint(checkpoint):checkpoint;
   const cache=model.layers.map(()=>({k:[],v:[]})),tokens=encodeMessages(messages);
@@ -117,18 +140,14 @@ export function scratchGenerate(checkpoint,messages,{maxNewTokens=48}={}){
   for(const token of tokens)logits=logitsForToken(model,token,cache);
   const out=[];
   for(let t=0;t<maxNewTokens;t++){
-    let winner=-1,top=-Infinity;
-    for(let i=0;i<V;i++){
-      if(i===PAD||i===USER||i===ASSISTANT)continue;
-      if(logits[i]>top){top=logits[i];winner=i;}
-    }
-    if(winner===END)break;
-    out.push(winner);
-    logits=logitsForToken(model,winner,cache);
+    const token=sampleToken(logits,{temperature,topK,used:out,random});
+    if(token===END)break;
+    out.push(token);
+    if(typeof onToken==='function')onToken(token);
+    logits=logitsForToken(model,token,cache);
   }
   try{return decoder.decode(Uint8Array.from(out)).trim();}catch{return '';}
 }
-
 
 // A bounded next-byte validation score. Used to reject obviously regressive
 // training updates before they are merged into the community candidate.
