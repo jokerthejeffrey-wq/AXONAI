@@ -45,7 +45,7 @@ document.getElementById('composer').onsubmit = async e => {
   busy = true;
   send.disabled = true;
   document.getElementById('new').disabled = true;
-  let userBubble = null;
+  let userBubble = null, assistantBubble = null;
   try {
     await window.axonSecurityReady;
     const token = window.axonSecurityToken();
@@ -62,8 +62,27 @@ document.getElementById('composer').onsubmit = async e => {
       const response = await axonFetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: outgoing, ...(token ? { turnstileToken: token } : {}) })
+        body: JSON.stringify({ messages: outgoing, stream: true, ...(token ? { turnstileToken: token } : {}) })
       });
+      if(response.ok && (response.headers.get('content-type')||'').includes('application/x-ndjson')){
+        assistantBubble=bubble('assistant','');
+        const reader=response.body.getReader(),decoder=new TextDecoder();let pending='',reply='',done=false;
+        while(true){
+          const part=await reader.read();pending+=decoder.decode(part.value||new Uint8Array(),{stream:!part.done});
+          let newline;
+          while((newline=pending.indexOf('\n'))>=0){
+            const line=pending.slice(0,newline);pending=pending.slice(newline+1);if(!line)continue;
+            const event=JSON.parse(line);
+            if(event.type==='error')throw Error(event.error);
+            if(event.type==='meta')statusEl.textContent='Experimental student · checkpoint '+event.version;
+            if(event.type==='delta'){reply+=event.text;assistantBubble.textContent=reply;}
+            if(event.type==='done')done=true;
+          }
+          if(part.done)break;
+        }
+        if(!done||!reply.trim())throw Error('The student did not finish a usable response. It still needs training.');
+        data={reply};break;
+      }
       data = await response.json();
       if (response.ok) break;
       if (!data.retryable || attempt === 29) throw Error(data.error || 'Server could not serve the request.');
@@ -74,10 +93,11 @@ document.getElementById('composer').onsubmit = async e => {
     }
     showChatMode();
     messages = [...outgoing, { role: 'assistant', content: data.reply }];
-    bubble('assistant', data.reply);
+    if(!assistantBubble)bubble('assistant', data.reply);
     statusEl.textContent = '';
   } catch (error) {
     userBubble?.remove();
+    assistantBubble?.remove();
     if (!messages.length) document.getElementById('welcome').hidden = false;
     prompt.value = text;
     resize();

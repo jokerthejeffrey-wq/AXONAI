@@ -3,7 +3,7 @@ import {manifestFor,assemble} from './train-store.js';
 import {sha256} from './train-core.js';
 import {parseCheckpoint,scratchGenerate} from './scratch-infer.js';
 let loaded=null;
-async function loadStudent(version){
+export async function loadStudent(version){
   if(loaded?.version===version)return loaded.promise;
   const promise=(async()=>{
     const manifest=await manifestFor(version);
@@ -36,11 +36,11 @@ export function localBasics(text){
 export const STILL_TRAINING='AXON AI is still learning. I cannot answer that reliably yet.';
 export async function scratchAnswer(messages,quality,{load=loadStudent,generate=scratchGenerate}={}){
   const version=Number(quality?.version||0),basic=localBasics(messages.at(-1).content);
-  if(basic)return {reply:basic,mode:'local-basic',version};
+  if(basic&&version===0)return {reply:basic,mode:'local-basic',version};
   if(!Number.isSafeInteger(version)||version<0)return {reply:STILL_TRAINING,mode:'learning',version:0};
   try{
     const model=await load(version);
-    const answer=generate(model,messages,{maxNewTokens:48});
+    const answer=generate(model,messages,{maxNewTokens:128});
     // Version 0 contains random initial weights and cannot be trusted.
     if(version>0&&readableReply(answer))return {reply:answer,mode:'student',version};
   }catch(error){

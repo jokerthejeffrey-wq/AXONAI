@@ -1,7 +1,7 @@
 name: AXON scratch local chat tests
 on:
   push:
-    branches: [main, axon-scratch-local-only, fix-training-queue-mobile-nov13]
+    branches: [main, axon-scratch-local-only, fix-training-queue-mobile-nov13, conversational-training-streaming]
   workflow_dispatch:
 
 permissions:
@@ -21,3 +21,4 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run build
       - run: npm test
+      - run: python3 -m unittest trainer.test_corpus -v
