@@ -21,6 +21,55 @@ class Launcher {
  static bool Healthy(string path){
   try{return File.Exists(path)&&Run(path,"-c \"import sys,struct; assert sys.version_info[:2]==(3,12) and struct.calcsize('P')==8; import venv,ensurepip\"",Path.GetDirectoryName(path))==0;}catch{return false;}
  }
+ static string TimeLeft(long done,long total,DateTime start){
+  if(done<=0||total<=0)return "calculating";
+  double elapsed=Math.Max(1,(DateTime.UtcNow-start).TotalSeconds);
+  double remaining=Math.Max(0,(total-done)*elapsed/done);
+  if(remaining>=3600)return "~"+(int)(remaining/3600)+"h "+(int)((remaining%3600)/60)+"m";
+  if(remaining>=60)return "~"+(int)(remaining/60)+"m "+(int)(remaining%60)+"s";
+  return "~"+(int)remaining+"s";
+ }
+ static void ShowProgress(string label,int percent,string eta){
+  int filled=Math.Max(0,Math.Min(20,percent/5));
+  var bar=new string('=',filled)+new string(' ',20-filled);
+  var line=label+" ["+bar+"] "+percent+"%  remaining: "+eta;
+  Console.Write("\r"+line.PadRight(95));
+ }
+ static void DownloadPython(string url,string path){
+  ServicePointManager.SecurityProtocol=SecurityProtocolType.Tls12;
+  using(var web=new WebClient())
+   using(var input=web.OpenRead(url))
+    using(var output=new FileStream(path,FileMode.Create,FileAccess.Write,FileShare.None)){
+     long total=web.ResponseHeaders==null?-1:web.ResponseHeaders["Content-Length"]==null?-1:long.Parse(web.ResponseHeaders["Content-Length"]);
+     var start=DateTime.UtcNow;var last=start;
+     var buffer=new byte[131072];long read=0;int n;
+     ShowProgress("Python download",0,"calculating");
+     while((n=input.Read(buffer,0,buffer.Length))>0){
+      output.Write(buffer,0,n);read+=n;
+      if((DateTime.UtcNow-last).TotalMilliseconds>=500){
+       var percent=total>0?Math.Min(99,(int)(100*read/total)):0;
+       ShowProgress("Python download",percent,TimeLeft(read,total,start));
+       last=DateTime.UtcNow;
+      }
+     }
+     if(total>0&&read!=total)throw new Exception("Python download incomplete.");
+     ShowProgress("Python download",100,"~0s");Console.WriteLine();
+    }
+ }
+ static int InstallPython(string installer,string args,string home){
+  using(var p=Process.Start(new ProcessStartInfo(installer,args){UseShellExecute=false,WorkingDirectory=home})){
+   var start=DateTime.UtcNow;
+   while(!p.WaitForExit(1000)){
+    // Installer does not expose completion bytes, so this is an approximate stage ETA.
+    var elapsed=(DateTime.UtcNow-start).TotalSeconds;
+    int estimate=(int)Math.Min(95,elapsed/90*100);
+    ShowProgress("Python setup",estimate,elapsed<4?"calculating":"estimated");
+   }
+   ShowProgress("Python setup",100,"~0s");Console.WriteLine();
+   return p.ExitCode;
+  }
+ }
+
  static string Python(string home){
   string local=Path.Combine(home,"python312","python.exe");if(Healthy(local))return local;
   foreach(var hive in new[]{Registry.CurrentUser,Registry.LocalMachine}){
@@ -29,13 +78,11 @@ class Launcher {
     if(dir!=null&&Healthy(Path.Combine(dir,"python.exe")))return Path.Combine(dir,"python.exe");
    }
   }
-  Console.WriteLine("Downloading Python 3.12 for AXONAI...");
   string installer=Path.Combine(home,"python-3.12.10-amd64.exe");
-  ServicePointManager.SecurityProtocol=SecurityProtocolType.Tls12;
-  using(var web=new WebClient())web.DownloadFile("https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe",installer);
+  if(!File.Exists(installer)||Hash(File.ReadAllBytes(installer))!=InstallerHash)
+   DownloadPython("https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe",installer);
   if(Hash(File.ReadAllBytes(installer))!=InstallerHash)throw new Exception("Python download checksum failed. Run again to retry.");
-  Console.WriteLine("Installing Python for this Windows account...");
-  int code=Run(installer,"/quiet InstallAllUsers=0 Include_launcher=0 Include_test=0 Include_doc=0 Include_tcltk=0 PrependPath=0 Shortcuts=0 TargetDir="+Quote(Path.Combine(home,"python312")),home);
+  int code=InstallPython(installer,"/quiet InstallAllUsers=0 Include_launcher=0 Include_test=0 Include_doc=0 Include_tcltk=0 PrependPath=0 Shortcuts=0 TargetDir="+Quote(Path.Combine(home,"python312")),home);
   if(code!=0&&code!=3010)throw new Exception("Python installer returned "+code);
   File.Delete(installer);
   if(!Healthy(local))throw new Exception("Python setup needs attention. Install Python 3.12 x64 from python.org and retry.");
