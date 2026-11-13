@@ -7,7 +7,7 @@ import time
 import venv
 from contextlib import contextmanager
 
-TORCH_VERSION = '2.7.1'
+TRAINER_VERSION = 'numpy-v1'
 ROOT = Path(__file__).resolve().parents[1]
 REQUIREMENTS = ROOT / 'trainer' / 'requirements.txt'
 
@@ -63,7 +63,7 @@ def prepare_environment(gpu, repair):
         folder = ROOT / f'.trainer-{device}'
     python = folder / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
     stamp = folder / 'dependencies.sha256'
-    fingerprint = hashlib.sha256(REQUIREMENTS.read_bytes() + f'{TORCH_VERSION}-{device}'.encode()).hexdigest()
+    fingerprint = hashlib.sha256(REQUIREMENTS.read_bytes() + f'{TRAINER_VERSION}-{device}'.encode()).hexdigest()
     with setup_lock(folder):
         if not repair and python.is_file() and stamp.is_file() and stamp.read_text().strip() == fingerprint:
             print('Dependencies already installed. Reusing AXONAI environment.', flush=True)
@@ -72,21 +72,18 @@ def prepare_environment(gpu, repair):
         if not python.is_file():
             print('Creating the AXONAI Python environment…', flush=True)
             venv.EnvBuilder(with_pip=True).create(folder)
-        index = 'cu128' if gpu else 'cpu'
         pip = [str(python), '-u', '-m', 'pip', 'install', '--no-compile', '--no-input',
                '--disable-pip-version-check', '--timeout', '30', '--retries', '3']
         if repair:
             pip.append('--force-reinstall')
-        run_setup_step('Installing PyTorch. Unpacking the wheel can take several minutes.',
-                       [*pip, f'torch=={TORCH_VERSION}+{index}', '--index-url', f'https://download.pytorch.org/whl/{index}'])
-        run_setup_step('Installing conversation trainer dependencies.', [*pip, '-r', str(REQUIREMENTS)])
+        run_setup_step('Installing trainer dependencies.', [*pip, '-r', str(REQUIREMENTS)])
+        if gpu:
+            run_setup_step('Installing NVIDIA GPU array support.', [*pip, 'cupy-cuda12x==13.5.1'])
         run_setup_step('Checking package compatibility.', [str(python), '-m', 'pip', 'check'])
-        expected_cuda = '12.8' if gpu else None
-        check = ('import torch, pyarrow, psutil, requests, safetensors; '
-                 'from transformers import Qwen2ForCausalLM; '
-                 f'assert torch.version.cuda == {expected_cuda!r}; '
-                 'assert torch.ones(1, device="cpu").item() == 1')
-        run_setup_step('Checking PyTorch and the teacher runtime.', [str(python), '-c', check])
+        check = 'import numpy, pyarrow, psutil, requests, safetensors'
+        if gpu:
+            check += '; import cupy; assert cupy.cuda.runtime.getDeviceCount() > 0'
+        run_setup_step('Checking the training runtime.', [str(python), '-c', check])
         stamp.write_text(fingerprint + '\n')
         print('Dependency setup complete.', flush=True)
     return python

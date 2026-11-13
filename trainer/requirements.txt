@@ -2,6 +2,5 @@ requests==2.32.4
 numpy==2.2.6
 safetensors==0.6.2
 psutil==7.0.0
-transformers==4.51.3
 pyarrow==19.0.1
 filelock>=3.18,<5

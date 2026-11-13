@@ -87,12 +87,12 @@ class Launcher {
     try{folder=Extract(home);if(!test)python=Python(home);}finally{mutex.ReleaseMutex();}
    }
    if(test){
-    if(!File.Exists(Path.Combine(folder,"trainer","run.pyc"))||!File.Exists(Path.Combine(folder,"student.pyc")))throw new Exception("Trainer payload missing.");
+    if(!File.Exists(Path.Combine(folder,"trainer","run.pyc"))||!File.Exists(Path.Combine(folder,"trainer","numpy_student.pyc")))throw new Exception("Trainer payload missing.");
     foreach(var path in Directory.GetFiles(folder,"*.py",SearchOption.AllDirectories))throw new Exception("Unexpected plain source: "+path);
     Console.WriteLine("EXE payload verified: "+Device+" conversational trainer.");return 0;
    }
    if(setupOnly){Console.WriteLine("Python and trainer setup verified.");return 0;}
-   Console.WriteLine("First setup downloads dependencies, conversation data and the local teacher.\nCtrl+C stops the program.\n");
+   Console.WriteLine("First setup downloads dependencies, conversation data.\nCtrl+C stops the program.\n");
    string cli=Quote(Path.Combine(folder,"trainer","start.pyc"))+(Device=="GPU"?" --gpu":"");
    foreach(string arg in args)cli+=" "+Quote(arg);
    int result=Run(python,cli,folder);

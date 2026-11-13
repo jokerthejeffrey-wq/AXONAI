@@ -1,4 +1,4 @@
-"""Vercel/Neon/Blob trainer: same student architecture, local corpus and teacher."""
+"""Vercel/Neon/Blob trainer using NumPy or CuPy."""
 import argparse,os,sys,json,hashlib,time,uuid,tempfile
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
@@ -20,23 +20,20 @@ def main():
     parsed=urlparse(args.server)
     if parsed.scheme!='https' or parsed.username or parsed.password:p.error('An HTTPS coordinator URL is required')
     if not 1<=args.rounds<=1000:p.error('Rounds must be 1..1000')
-    print('Downloads up to 1 GB conversational TXT plus local teacher, dependencies and checkpoints. Dataset cache/index requires additional disk space. Uses your CPU/GPU and uploads student weights.')
+    print('Downloads up to 1 GB conversational TXT plus dependencies and checkpoints. Dataset cache/index requires additional disk space. Uses your CPU/GPU and uploads student weights.')
     if not args.yes and input('Start? [y/N] ').lower()!='y':return
     wait(512);info=prepare(args.cache)
-    wait(3000)
-    import torch
-    from safetensors.torch import save_file
-    from student import Student,load_weights,snapshot,train
-    from trainer.teacher import Teacher
-    torch.set_num_threads(2)
-    if args.device=='cuda' and not torch.cuda.is_available():raise RuntimeError('NVIDIA CUDA driver unavailable. Start CPU edition instead.')
-    if args.device=='cuda':torch.cuda.set_per_process_memory_fraction(.85)
+    wait(512)
+    from trainer.numpy_student import Student
+    if args.device == 'cuda':
+        print('Using NVIDIA GPU with CuPy.', flush=True)
+    else:
+        print('Using NumPy CPU training.', flush=True)
     worker_file=Path(args.cache)/'worker-id'
     if not worker_file.exists():worker_file.write_text(str(uuid.uuid4()))
     worker=worker_file.read_text().strip();session=requests.Session();base=args.server.rstrip('/')
-    teacher=Teacher(args.device)
     try:
-        model=Student().to(args.device)
+        model=Student(args.device)
         for n in range(args.rounds):
             wait(512)
             r=request(session,'POST',base+'/api/job',json={'worker':worker,'corpus':info})
@@ -47,9 +44,16 @@ def main():
             if arch!=model.config:raise RuntimeError('Student architecture mismatch')
             rows=[]
             for offset,raw in enumerate(read_rows(args.cache,assignment['start'],assignment['count'])):
-                print(f"Teacher preparing record {assignment['start']+offset+1}…",flush=True)
-                wait(256);row=teacher.lesson(raw)
-                if row:rows.append(row)
+                print(f"Preparing record {assignment['start']+offset+1}…",flush=True)
+                wait(256)
+                from trainer.corpus import training_context
+                context, answer = training_context(raw)
+                budget = 509 - sum(len(m['content'].encode()) + 2 for m in context)
+                if context and answer and budget > 24:
+                    if len(answer.encode()) > budget:
+                        answer = answer.encode()[:budget].decode('utf-8', errors='ignore').rsplit(' ', 1)[0].strip()
+                    if answer:
+                        rows.append({'concept':'conversation', 'messages':context, 'response':answer})
             if not rows:print('No safe short examples in this reservation; skipping without replay.');continue
             manifest=request(session,'GET',base+f"/api/checkpoint/{job['version']}").json()
             with tempfile.TemporaryDirectory() as tmp:
@@ -66,16 +70,16 @@ def main():
                                 if size>32*1024**2:raise RuntimeError('Oversized checkpoint')
                                 out.write(block);digest.update(block)
                 if size!=manifest['size'] or digest.hexdigest()!=manifest['sha256']:raise RuntimeError('Checkpoint checksum mismatch')
-                load_weights(model,file)
+                model.load(file)
                 # Do not replay this reservation, even if upload fails after training.
-                train(model,rows,args.device,before_step=lambda:wait(256))
-                save_file(snapshot(model),str(file));data=file.read_bytes();chunk_size=2_500_000
+                model.train(rows,before_step=lambda:wait(256))
+                model.save(file);data=file.read_bytes();chunk_size=2_500_000
                 parts=(len(data)+chunk_size-1)//chunk_size
                 for index in range(parts):
                     request(session,'POST',base+'/api/update-part',data=data[index*chunk_size:(index+1)*chunk_size],headers={'Content-Type':'application/octet-stream','X-AXON-Job':job['id'],'X-AXON-Token':job['upload_token'],'X-AXON-Part':str(index)})
                 result=request(session,'POST',base+'/api/update',json={'job':job['id'],'token':job['upload_token'],'parts':parts,'size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
                 print(f"Round {n+1}: {len(rows)} distinct conversation examples submitted for validation.",flush=True)
-    finally:teacher.close()
+    finally:session.close()
 
 if __name__=='__main__':
     try:main()
