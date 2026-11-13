@@ -21,18 +21,6 @@ export function readableReply(answer){
   return letters.length>=7&&letters.length/chars.length>=.6&&
     new Set(letters.map(c=>c.toLowerCase())).size>=5&&answer.trim().split(/\s+/u).length>=3;
 }
-export function localBasics(text){
-  const t=String(text).trim().toLowerCase().replace(/[.!?]+$/,'');
-  if(/^(hello|hi|hey|hello axon|hi axon|good morning|good evening|good afternoon)$/.test(t))
-    return 'Hello! What would you like to ask?';
-  if(/^(what can you help me with|what can you do|help)$/.test(t))
-    return 'I can handle basic calculations and explain the AXON AI project. My independently trained language model is still learning.';
-  if(/^(explain how ai learns|how does ai learn|how do ai models learn)$/.test(t))
-    return 'An AI model learns by adjusting its numerical weights using examples. AXON AI volunteers train its model on their computers, then submit updates to the website for review.';
-  if(/^(help me start a project|how do i start a project)$/.test(t))
-    return 'Start by describing your goal, choosing one small feature, and testing it. AXON AI is still learning, so I may not be able to guide every step.';
-  return null;
-}
 export const STILL_TRAINING='AXON AI is still learning. I cannot answer that reliably yet.';
 export async function scratchAnswer(messages,quality,{load=loadStudent,generate=scratchGenerate}={}){
   const version=Number(quality?.version||0);
