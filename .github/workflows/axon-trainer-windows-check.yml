@@ -1,7 +1,7 @@
 name: Validate rebuilt AXON Windows trainers
 on:
   push:
-    branches: [installer-eta-dual-teacher-20261114, fix-ram-admission-compact-teacher]
+    branches: [installer-eta-dual-teacher-20261114, fix-ram-admission-compact-teacher, fix-teacher-loader-progress-20261114]
   workflow_dispatch:
 permissions:
   contents: read
