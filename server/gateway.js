@@ -52,6 +52,34 @@ export function gatewayModel(env = process.env) {
   return model;
 }
 
+// A bounded diagnostic for server logs. Never include prompts, tokens, URLs,
+// response bodies, or arbitrary upstream error messages.
+function logGatewayFailure(error) {
+  const safe = value => String(value ?? '').replace(/[^a-zA-Z0-9_.-]/g, '').slice(0,65);
+  const status = value => {
+    const n = Number(value);
+    return Number.isInteger(n) && n >= 100 && n <= 599 ? n : null;
+  };
+  const first = error?.cause || error?.errors?.[0];
+  let providerCode = '';
+  let providerType = '';
+  const raw = error?.responseBody;
+  if (typeof raw === 'string' && raw.length < 6000) {
+    try {
+      const data = JSON.parse(raw);
+      providerCode = safe(data?.error?.code || data?.code);
+      providerType = safe(data?.error?.type || data?.type);
+    } catch {}
+  }
+  console.error('AXON Gateway diagnostic', JSON.stringify({
+    name:safe(error?.name),code:safe(error?.code),
+    status:status(error?.statusCode || error?.status || error?.response?.status),
+    causeName:safe(first?.name),causeCode:safe(first?.code),
+    causeStatus:status(first?.statusCode || first?.status),
+    providerCode,providerType
+  }));
+}
+
 export function classifyGatewayError(error) {
   if (error instanceof GatewayError) return error;
   const status = Number(error?.statusCode || error?.status || error?.response?.status || 0);
@@ -110,6 +138,7 @@ export async function gatewayGenerate(messages, _req, {
     if (!answer) throw new GatewayError('Empty model response.','empty_reply');
     return answer;
   } catch (error) {
+    if (!(error instanceof GatewayError)) logGatewayFailure(error);
     throw classifyGatewayError(error);
   }
 }
