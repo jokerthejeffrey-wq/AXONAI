@@ -1,0 +1,45 @@
+name: AXON AI chat live smoke test
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-chat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify real production chat reply
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, sys, urllib.request, urllib.error
+          url = 'https://axonai-theta.vercel.app/api/chat'
+          request = urllib.request.Request(url, data=json.dumps({
+            'messages':[{'role':'user','content':'Please say hello.'}]
+          }).encode(), headers={
+            'Content-Type':'application/json',
+            'Origin':'https://axonai-theta.vercel.app',
+            'User-Agent':'AXONAI-Live-Smoke/1.0'
+          }, method='POST')
+          try:
+              with urllib.request.urlopen(request, timeout=75) as response:
+                  body=json.load(response)
+                  print('HTTP status:',response.status)
+                  if response.status==200 and isinstance(body.get('reply'),str) and body['reply'].strip():
+                      print('Chat reply received; length:',len(body['reply']))
+                      sys.exit(0)
+                  print('Chat returned no reply. Diagnostic code:',str(body.get('code','unknown'))[:80])
+          except urllib.error.HTTPError as exc:
+              try:
+                  body=json.load(exc)
+              except Exception:
+                  body={}
+              print('HTTP status:',exc.code,'Diagnostic code:',str(body.get('code','unknown'))[:80])
+          except Exception as exc:
+              print('Chat request failed:',type(exc).__name__)
+          sys.exit(1)
+          PY
