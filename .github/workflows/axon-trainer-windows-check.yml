@@ -1,0 +1,38 @@
+name: Validate rebuilt AXON Windows trainers
+on:
+  push:
+    branches: [installer-eta-dual-teacher-20261114]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-exes:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - name: Compile both Windows console binaries and run self-tests
+        shell: pwsh
+        run: |
+          python scripts/windows/build.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./exe-build/CPU-AXON.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./exe-build/GPU-AXON.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify payload includes full trainer and teacher
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z=[IO.Compression.ZipFile]::OpenRead((Join-Path $pwd 'exe-build/payload.zip'))
+          try {
+            $names=$z.Entries.FullName
+            foreach ($item in @('student.pyc','trainer/start.pyc','trainer/progress.pyc','trainer/teacher.pyc','trainer/requirements-teacher.txt')) {
+              if ($names -notcontains $item) { throw "Missing packed file: $item" }
+            }
+          } finally { $z.Dispose() }
