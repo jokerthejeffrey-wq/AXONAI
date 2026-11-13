@@ -50,7 +50,8 @@ class Teacher:
             TEACHER, revision=REVISION, trust_remote_code=False)
         self.model = AutoModelForCausalLM.from_pretrained(
             TEACHER, revision=REVISION, trust_remote_code=False,
-            use_safetensors=True, torch_dtype=torch.float32,
+            use_safetensors=True, torch_dtype=torch.float16,
+            low_cpu_mem_usage=True,
             attn_implementation='eager').to(device).eval()
 
     def _ask(self, system, user, max_new_tokens=120):

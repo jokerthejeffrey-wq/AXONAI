@@ -4,7 +4,7 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import requests
 from trainer.corpus import prepare,read_rows
-from trainer.memory import wait
+from trainer.memory import wait, MemoryAdmissionError
 
 def request(session,method,url,**kwargs):
     for attempt in range(10):
@@ -31,7 +31,9 @@ def main():
         raise RuntimeError('NVIDIA CUDA is unavailable. Launch CPU-AXON.exe instead.')
     torch.set_num_threads(min(4,max(1,os.cpu_count() or 1)))
     print('Training full AXON transformer on '+args.device.upper()+'.', flush=True)
-    wait(2300)
+    # Half-precision, low-memory teacher needs substantially less headroom
+    # than the previous 2.3 GB unconditional reservation.
+    wait(1100)
     from trainer.teacher import Teacher
     print('Loading pretrained checker on this computer.', flush=True)
     teacher=Teacher('cpu')
@@ -106,3 +108,6 @@ def main():
 if __name__=='__main__':
     try:main()
     except KeyboardInterrupt:print('\nStopped.')
+    except MemoryAdmissionError as error:
+        print('\n'+str(error),flush=True)
+        sys.exit(2)
