@@ -6,8 +6,8 @@ test('Worker config points to AXON AI production site and no secret is bundled',
  assert.equal(config.website_url,'https://axonai-theta.vercel.app');
  assert.equal(Object.keys(config).join(','),'website_url');
 });
-test('AI SDK authentication dependency is installed by the deployment build',()=>{
+test('No AI SDK or external model dependency is installed by the deployment build',()=>{
  const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));
- assert.ok(pkg.dependencies.ai);
+ assert.ok(!pkg.dependencies.ai);
  assert.ok(!pkg.dependencies['@huggingface/transformers']);
 });
