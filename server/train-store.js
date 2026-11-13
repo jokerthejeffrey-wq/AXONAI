@@ -44,7 +44,17 @@ export async function publicStatus(){
     const [l]=await sql`SELECT val FROM axon_meta WHERE key='sequence'`;
     const [p]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
     return {ok:true,training_available:true,version:Number(v?.val||0),reserved_lessons:Number(l?.val||0),pending_updates:Number(p?.n||0)};
-  }catch(e){console.error('Training DB status failed',e?.name);return {ok:true,training_available:false,version:0,reason:'storage_unreachable'}}
+  }catch(e){
+    // Log only a bounded, redacted diagnostic; do not log the connection
+    // string, credentials, request bodies, or SQL parameters.
+    const sqlState=String(e?.code||e?.cause?.code||'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,30);
+    const detail=String(e?.message||'unknown')
+      .replace(/(?:postgres(?:ql)?):\/\/[^\s'"]+/gi,'[database-url]')
+      .replace(/(?:password|token|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,'[credential]')
+      .slice(0,220);
+    console.error('Training DB status failed',e?.name,sqlState,detail);
+    return {ok:true,training_available:false,version:0,reason:'storage_unreachable'}
+  }
 }
 export async function quality(){
   const status=await publicStatus();
