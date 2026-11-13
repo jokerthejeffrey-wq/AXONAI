@@ -46,16 +46,14 @@ class Teacher:
         from transformers import AutoTokenizer, AutoModelForCausalLM
         self.torch = torch
         self.device = device
+        import os
+        # Set timeouts before importing the Hub, which reads them at import.
+        os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '15')
+        os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '90')
         from huggingface_hub import snapshot_download
         from contextlib import contextmanager
         from threading import Event, Thread
         import time
-        import os
-
-        # The Hub reuses files already present in the user's cache. The
-        # download can be large; only select files needed for inference.
-        os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '15')
-        os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '90')
 
         @contextmanager
         def loading_progress(label):
@@ -65,7 +63,7 @@ class Teacher:
             def show_elapsed():
                 while not finished.wait(8):
                     seconds = int(time.monotonic() - started)
-                    print(f'\\r{label} | elapsed {seconds // 60}m {seconds % 60}s',
+                    print(f'\r{label} | elapsed {seconds // 60}m {seconds % 60}s',
                           end='', flush=True)
 
             pulse = Thread(target=show_elapsed, daemon=True)
@@ -81,11 +79,16 @@ class Teacher:
         with loading_progress('Downloading checker files'):
             # Pre-download from the pinned version. Hugging Face displays a
             # real file-transfer progress bar; successful downloads are cached.
-            cache_path = snapshot_download(
-                repo_id=TEACHER, revision=REVISION,
-                allow_patterns=['*.json', '*.safetensors', '*.model',
-                                '*.txt', '*.tiktoken'],
-                max_workers=2)
+            try:
+                cache_path = snapshot_download(
+                    repo_id=TEACHER, revision=REVISION,
+                    allow_patterns=['*.json', '*.safetensors', '*.model',
+                                    '*.txt', '*.tiktoken'],
+                    max_workers=2)
+            except Exception as error:
+                raise RuntimeError(
+                    'Checker download failed. Check the internet connection '
+                    'and relaunch; downloaded files will be reused.') from error
         print('Checker files ready. Initializing tokenizer...', flush=True)
         self.tokenizer = AutoTokenizer.from_pretrained(
             cache_path, local_files_only=True, trust_remote_code=False)
