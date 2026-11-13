@@ -15,17 +15,27 @@ export class GatewayError extends Error {
   }
 }
 
-export function gatewayToken(req, env = process.env) {
+export function gatewayToken(_req, env = process.env) {
+  // Informational only: the runtime may supply a fresh OIDC token through
+  // request context. Never treat arbitrary client headers as credentials.
   const key = typeof env.AI_GATEWAY_API_KEY === 'string' ? env.AI_GATEWAY_API_KEY.trim() : '';
   if (key) return key;
   const oidc = typeof env.VERCEL_OIDC_TOKEN === 'string' ? env.VERCEL_OIDC_TOKEN.trim() : '';
-  if (oidc) return oidc;
-  if (env.VERCEL) {
-    // Vercel provides its fresh OIDC token through this header to functions.
-    const header = req?.headers?.['x-vercel-oidc-token'];
-    if (typeof header === 'string' && header.length > 20) return header.trim();
+  return oidc || null;
+}
+
+// Token retrieval is done inside the request (not at module load). The helper
+// resolves the trusted Vercel request context and refreshes tokens when needed.
+async function trustedVercelOidcToken(env, getOidcTokenFn) {
+  if (!env.VERCEL && !env.VERCEL_OIDC_TOKEN) return '';
+  if (getOidcTokenFn) return String((await getOidcTokenFn()) || '').trim();
+  try {
+    const {getVercelOidcToken} = await import('@vercel/oidc');
+    return String((await getVercelOidcToken()) || '').trim();
+  } catch {
+    // The official AI SDK can also obtain OIDC automatically on Vercel.
+    return '';
   }
-  return null;
 }
 
 export function gatewayModel(env = process.env) {
@@ -48,50 +58,50 @@ export function classifyGatewayError(error) {
   if (status === 404 || status === 400) return new GatewayError('The selected model is not available.','model_unavailable');
   if (status === 429 || code.includes('ratelimit')) return new GatewayError('AI Gateway is busy.','rate_limited',503,true);
   if (status === 408 || status === 504 || code.includes('timeout') || code.includes('abort')) return new GatewayError('The model request timed out.','timeout',504,true);
-  if (code.includes('api key') || code.includes('no credentials')) return new GatewayError('AI Gateway authentication is missing.','auth_missing');
+  if (code.includes('api key') || code.includes('no credentials') || code.includes('missing_credential')) return new GatewayError('AI Gateway authentication is missing.','auth_missing');
   return new GatewayError('AI Gateway is temporarily unavailable.','upstream');
 }
 
-export async function gatewayGenerate(messages, req, {env = process.env, generateTextFn} = {}) {
+export async function gatewayGenerate(messages, _req, {
+  env = process.env, generateTextFn, createGatewayFn, getOidcTokenFn
+} = {}) {
   const model = gatewayModel(env);
-  // Local tests should not access a paid provider. On Vercel the AI SDK
-  // can use its automatic OIDC mechanism even when there is no API key.
-  if (!generateTextFn && !env.VERCEL && !gatewayToken(req, env)) {
-    throw new GatewayError('Enable Vercel AI Gateway or configure a server-side API key.','auth_missing');
+  if (!generateTextFn && !env.VERCEL && !gatewayToken(null, env)) {
+    throw new GatewayError('AI Gateway credentials are unavailable.','auth_missing');
   }
   const chat = [
-    {role:'system',content:SYSTEM},
+    {role:'system', content:SYSTEM},
     ...messages.slice(-11).map(m=>({role:m.role,content:m.content}))
   ];
   try {
     const sdk = generateTextFn ? null : await import('ai');
     const generateText = generateTextFn || sdk.generateText;
-    // Vercel injects a short-lived project OIDC token into each function
-    // request. Prefer it when available, even if the owner accidentally set
-    // an invalid manual API key. This keeps credentials out of the ZIP.
-    const oidcHeader = env.VERCEL && typeof req?.headers?.['x-vercel-oidc-token'] === 'string'
-      ? req.headers['x-vercel-oidc-token'].trim() : '';
-    const projectOidc = env.VERCEL ? (oidcHeader || env.VERCEL_OIDC_TOKEN || '') : '';
-    const modelProvider = !generateTextFn && projectOidc && sdk.createGateway
-      ? sdk.createGateway({apiKey:projectOidc})(model) : model;
+    const createGateway = createGatewayFn || sdk?.createGateway;
+    const oidc = await trustedVercelOidcToken(env, getOidcTokenFn);
+    // An accidentally configured invalid AI_GATEWAY_API_KEY must not override
+    // the trusted short-lived Vercel OIDC credential when it is available.
+    const useOidc = Boolean(oidc && createGateway);
+    const preferredModel = useOidc ? createGateway({apiKey:oidc})(model) : model;
     const options = {
-      model:modelProvider,
+      model:preferredModel,
       messages:chat,
       temperature:0.3,
       maxOutputTokens:450,
-      abortSignal:AbortSignal.timeout(45000),
+      abortSignal:AbortSignal.timeout(45000)
     };
     let result;
-    try { result = await generateText(options); }
-    catch (error) {
-      // A valid manually configured key is the backup if project OIDC is
-      // unavailable. Do not retry for billing or transient provider errors.
+    try {
+      result = await generateText(options);
+    } catch (error) {
       const failure=classifyGatewayError(error);
-      if (modelProvider === model || !env.AI_GATEWAY_API_KEY || !['auth_rejected','access_denied'].includes(failure.code)) throw error;
-      result = await generateText({...options,model});
+      // A real server-side API key can be tried if the Vercel OIDC credential
+      // was rejected. Other errors should not generate duplicate model calls.
+      if (!useOidc || !env.AI_GATEWAY_API_KEY ||
+        !['auth_rejected','access_denied'].includes(failure.code)) throw error;
+      result = await generateText({...options, model});
     }
     const answer = typeof result?.text === 'string' ? result.text.trim() : '';
-    if (!answer) throw new GatewayError('The model returned an empty response.','empty_reply');
+    if (!answer) throw new GatewayError('Empty model response.','empty_reply');
     return answer;
   } catch (error) {
     throw classifyGatewayError(error);
