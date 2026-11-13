@@ -16,7 +16,7 @@ with zipfile.ZipFile(payload,'w',zipfile.ZIP_DEFLATED) as z:
 installer=out/'python-installer.exe'
 urllib.request.urlretrieve('https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe',installer)
 # Verify the official installer signature before pinning its bytes into the launcher.
-subprocess.run(['powershell','-NoProfile','-Command',"$s=Get-AuthenticodeSignature '"+str(installer)+"'; if($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'Python Software Foundation'){throw 'Invalid Python installer signature'}"],check=True)
+subprocess.run(['pwsh','-NoProfile','-Command',"$s=Get-AuthenticodeSignature '"+str(installer)+"'; if($s.Status -ne 'Valid' -or $s.SignerCertificate.Subject -notmatch 'Python Software Foundation'){throw 'Invalid Python installer signature'}"],check=True)
 installer_hash=hashlib.sha256(installer.read_bytes()).hexdigest();payload_hash=hashlib.sha256(payload.read_bytes()).hexdigest()
 csc=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
 for device in ('CPU','GPU'):
