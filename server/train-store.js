@@ -5,6 +5,9 @@ import {CHUNK_BYTES,MAX_CHECKPOINT,BATCH,MANIFEST,makeLessons,sha256,packChunks,
 import fs from 'node:fs';
 import path from 'node:path';
 import {initialCheckpoint} from './base-checkpoint.js';
+import {parseCheckpoint,scoreNextByte} from './scratch-infer.js';
+export const PENDING_QUEUE_LIMIT=12;
+class InvalidCandidate extends Error {}
 
 let initialized;
 export class TrainError extends Error {constructor(message,status=400){super(message);this.status=status;}}
@@ -29,6 +32,8 @@ async function setup(sql){
     version bigint primary key, parts jsonb not null, size bigint not null, sha256 text not null
   )`;
   await sql`CREATE TABLE IF NOT EXISTS axon_daily (day date primary key, claims integer not null default 0)`;
+  await sql`CREATE TABLE IF NOT EXISTS axon_queue_lease (id integer primary key, owner text not null, locked_until timestamptz not null)`;
+  await sql`INSERT INTO axon_queue_lease (id,owner,locked_until) VALUES (1,'',to_timestamp(0)) ON CONFLICT DO NOTHING`;
   await sql`CREATE TABLE IF NOT EXISTS axon_quality (
     version bigint primary key, score integer, passed integer, total integer, tested boolean not null default false,
     ready boolean not null default false, checked_at timestamptz
@@ -43,7 +48,7 @@ export async function publicStatus(){
     const [v]=await sql`SELECT val FROM axon_meta WHERE key='version'`;
     const [l]=await sql`SELECT val FROM axon_meta WHERE key='sequence'`;
     const [p]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
-    return {ok:true,training_available:true,version:Number(v?.val||0),reserved_lessons:Number(l?.val||0),pending_updates:Number(p?.n||0)};
+    return {ok:true,training_available:true,version:Number(v?.val||0),reserved_lessons:Number(l?.val||0),pending_updates:Number(p?.n||0),queue_capacity:PENDING_QUEUE_LIMIT,queue_full:Number(p?.n||0)>=PENDING_QUEUE_LIMIT};
   }catch(e){
     // Log only a bounded, redacted diagnostic; do not log the connection
     // string, credentials, request bodies, or SQL parameters.
@@ -66,8 +71,14 @@ export async function quality(){
 export async function claim(worker){
   check(workerOK(worker),'Invalid worker identifier');
   const sql=await db();
-  const [pending]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
-  check(Number(pending.n)<12,'Training queue is full. Try later.',429);
+  let [pending]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
+  if(Number(pending.n)>=PENDING_QUEUE_LIMIT){
+    try{await autoReviewOne(sql)}
+    catch(error){console.error('AXON queue verification deferred:',String(error?.name||'Error').slice(0,45))}
+    ;[pending]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
+    // Older trainers will stop cleanly on 204 instead of looping on a 429.
+    if(Number(pending.n)>=PENDING_QUEUE_LIMIT)return null;
+  }
   await sql`INSERT INTO axon_daily(day,claims) VALUES(CURRENT_DATE,0) ON CONFLICT DO NOTHING`;
   const [quota]=await sql`UPDATE axon_daily SET claims=claims+1 WHERE day=CURRENT_DATE AND claims<96 RETURNING claims`;
   check(!!quota,'Daily training capacity reached. Try tomorrow.',429);
@@ -165,21 +176,84 @@ export async function review(owner,id,action){
     await sql`UPDATE axon_jobs SET status='rejected' WHERE id=${id} AND status='pending'`;
     return {id,status:'rejected'};
   }
-  const version=await currentVersion(sql);
-  const [parts]=[await sql`SELECT part_index,size,url FROM axon_parts WHERE job_id=${id} ORDER BY part_index`];
+  return integrateJob(sql,j,{automatic:false});
+
+}
+
+
+const VALIDATION_PROBES=[
+  {messages:[{role:'user',content:'hello'}],expected:72},
+  {messages:[{role:'user',content:'What is 2 + 2?'}],expected:52}
+];
+function validationScore(model){
+  return VALIDATION_PROBES.map(probe=>scoreNextByte(model,probe.messages,probe.expected));
+}
+function validateCandidate(current,merged){
+  let before,after;
+  try{
+    before=validationScore(parseCheckpoint(current));
+    after=validationScore(parseCheckpoint(merged));
+  }catch{throw new InvalidCandidate('Checkpoint validation failed')}
+  if(after.some((loss,i)=>!Number.isFinite(loss)||loss>before[i]+0.85) ||
+    (after[0]+after[1])>(before[0]+before[1])+0.55) {
+    throw new InvalidCandidate('Checkpoint regresses on validation probes');
+  }
+}
+async function integrateJob(sql,j,{automatic=false}={}){
+  const id=j.id,version=await currentVersion(sql);
+  const parts=await sql`SELECT part_index,size,url FROM axon_parts WHERE job_id=${id} ORDER BY part_index`;
   const [baseManifest,currentManifest]=await Promise.all([manifestFor(Number(j.version)),manifestFor(version)]);
-  const [base,current,candidate]=await Promise.all([assemble(baseManifest.parts),assemble(currentManifest.parts),assemble(parts)]);
-  check(sha256(candidate)===j.sha256,'Submitted file checksum mismatch',409);
-  const merged=mergeWeights(base,current,candidate);
-  const next=version+1;const urls=[];
+  const [base,current,candidate]=await Promise.all([
+    assemble(baseManifest.parts),assemble(currentManifest.parts),assemble(parts)
+  ]);
+  check(sha256(candidate)===j.sha256,'Submitted file checksum mismatch',400);
+  let merged;
+  try{merged=mergeWeights(base,current,candidate)}
+  catch{throw new InvalidCandidate('Unsafe model weight update')}
+  if(automatic)validateCandidate(current,merged);
+  const next=version+1,urls=[];
   for(const [i,part] of packChunks(merged).entries()){
-    const out=await put(`training/approved/v${next}/${i}-${crypto.randomBytes(6).toString('hex')}.bin`,part,
-      {access:'public',contentType:'application/octet-stream',addRandomSuffix:false,cacheControlMaxAge:60});
+    const out=await put(`training/approved/v${next}/${i}-${crypto.randomBytes(6).toString('hex')}.bin`,part,{
+      access:'public',contentType:'application/octet-stream',addRandomSuffix:false,cacheControlMaxAge:60
+    });
     urls.push({url:out.url,size:part.length});
   }
-  await sql`INSERT INTO axon_checkpoints(version,parts,size,sha256) VALUES(${next},${JSON.stringify(urls)}::jsonb,${merged.length},${sha256(merged)}) ON CONFLICT DO NOTHING`;
-  const [updated]=await sql`UPDATE axon_meta SET val=${next} WHERE key='version' AND val=${version} RETURNING val`;
-  check(!!updated,'Checkpoint version changed during approval; review current version.',409);
-  await sql`UPDATE axon_jobs SET status='approved',merged_version=${next} WHERE id=${id} AND status='pending'`;
+  await sql`INSERT INTO axon_checkpoints(version,parts,size,sha256)
+    VALUES(${next},${JSON.stringify(urls)}::jsonb,${merged.length},${sha256(merged)})
+    ON CONFLICT DO NOTHING`;
+  const [updated]=await sql`UPDATE axon_meta SET val=${next}
+    WHERE key='version' AND val=${version} RETURNING val`;
+  check(!!updated,'Checkpoint version changed during approval; retry.',409);
+  await sql`UPDATE axon_jobs SET status='approved',merged_version=${next}
+    WHERE id=${id} AND status='pending'`;
   return {id,status:'approved',version:next};
+}
+async function autoReviewOne(sql){
+  // Serialize promotions across Vercel functions. Dead instances have a
+  // time-limited lease so the queue can recover without a persistent server.
+  const owner=crypto.randomBytes(18).toString('hex');
+  const [lease]=await sql`UPDATE axon_queue_lease
+    SET owner=${owner},locked_until=now()+interval '240 seconds'
+    WHERE id=1 AND locked_until<now() RETURNING id`;
+  if(!lease)return {processed:false,reason:'review_in_progress'};
+  try{
+    const [job]=await sql`SELECT * FROM axon_jobs
+      WHERE status='pending' ORDER BY submitted_at ASC LIMIT 1`;
+    if(!job)return {processed:false,reason:'empty'};
+    try{
+      const result=await integrateJob(sql,job,{automatic:true});
+      return {processed:true,result};
+    }catch(error){
+      if(error instanceof InvalidCandidate ||
+        (error instanceof TrainError && error.status>=400 && error.status<500 && error.status!==409)){
+        await sql`UPDATE axon_jobs SET status='rejected'
+          WHERE id=${job.id} AND status='pending'`;
+        return {processed:true,result:{id:job.id,status:'rejected'}};
+      }
+      throw error;
+    }
+  }finally{
+    await sql`UPDATE axon_queue_lease SET owner='',locked_until=to_timestamp(0)
+      WHERE id=1 AND owner=${owner}`;
+  }
 }
