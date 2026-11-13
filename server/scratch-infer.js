@@ -109,7 +109,60 @@ export function encodeMessages(messages,{maxInputTokens=192}={}){
   if(tokens.length>maxInputTokens)throw Error('Message too long for the scratch model');
   return tokens;
 }
-export function scratchGenerate(checkpoint,messages,{maxNewTokens=48}={}){
+// Nucleus sampling, temperature and repetition penalties replace greedy argmax.
+// In this model a token is a UTF-8 byte, not an entire word. Preserve the
+// existing 260-token checkpoint/worker protocol until the model is retrained.
+export function sampleNextToken(logits,{
+  recent=[],temperature=.76,topK=32,topP=.90,rng=Math.random,minOutput=0,step=0
+}={}){
+  if(!logits||logits.length!==V)throw Error('Invalid token distribution');
+  if(!(temperature>0&&temperature<=2)||!(topP>0&&topP<=1))throw Error('Invalid sampling settings');
+  const counts=new Map();
+  for(const n of recent.slice(-96))counts.set(n,(counts.get(n)||0)+1);
+  const choices=[];
+  for(let id=0;id<V;id++){
+    if(id===PAD||id===USER||id===ASSISTANT)continue;
+    if(id===END && step<minOutput)continue;
+    let value=logits[id];
+    if(!Number.isFinite(value))continue;
+    const repeat=Math.min(counts.get(id)||0,8);
+    if(repeat){
+      const p=1+.09*repeat;
+      value=value>0?value/p:value*p;
+    }
+    // Prevent exact 3-byte loops while preserving ordinary doubled letters.
+    if(recent.length>=2){
+      const a=recent.at(-2),b=recent.at(-1);
+      for(let j=2;j<recent.length;j++){
+        if(recent[j-2]===a&&recent[j-1]===b&&recent[j]===id){
+          value-=2.2;break;
+        }
+      }
+    }
+    choices.push({id,score:value/temperature});
+  }
+  choices.sort((a,b)=>b.score-a.score);
+  const best=choices.slice(0,Math.max(1,Math.min(V,topK|0)));
+  const max=best[0]?.score;
+  if(!Number.isFinite(max))throw Error('No valid output tokens');
+  let all=0;
+  for(const item of best){item.weight=Math.exp(item.score-max);all+=item.weight;}
+  const nucleus=[];let running=0;
+  for(const item of best){
+    nucleus.push(item);running+=item.weight;
+    if(running/all>=topP)break;
+  }
+  const total=nucleus.reduce((v,item)=>v+item.weight,0);
+  let pick=Math.max(0,Math.min(.999999999,Number(rng()))) * total;
+  for(const item of nucleus){
+    pick-=item.weight;
+    if(pick<=0)return item.id;
+  }
+  return nucleus.at(-1).id;
+}
+export function scratchGenerate(checkpoint,messages,{
+  maxNewTokens=64,temperature=.76,topP=.90,rng=Math.random
+}={}){
   if(!Number.isInteger(maxNewTokens)||maxNewTokens<1||maxNewTokens>128)throw Error('Invalid generation limit');
   const model=Buffer.isBuffer(checkpoint)?parseCheckpoint(checkpoint):checkpoint;
   const cache=model.layers.map(()=>({k:[],v:[]})),tokens=encodeMessages(messages);
@@ -117,18 +170,15 @@ export function scratchGenerate(checkpoint,messages,{maxNewTokens=48}={}){
   for(const token of tokens)logits=logitsForToken(model,token,cache);
   const out=[];
   for(let t=0;t<maxNewTokens;t++){
-    let winner=-1,top=-Infinity;
-    for(let i=0;i<V;i++){
-      if(i===PAD||i===USER||i===ASSISTANT)continue;
-      if(logits[i]>top){top=logits[i];winner=i;}
-    }
-    if(winner===END)break;
-    out.push(winner);
-    logits=logitsForToken(model,winner,cache);
+    const next=sampleNextToken(logits,{
+      recent:out,temperature,topP,rng,minOutput:5,step:t
+    });
+    if(next===END)break;
+    out.push(next);
+    logits=logitsForToken(model,next,cache);
   }
   try{return decoder.decode(Uint8Array.from(out)).trim();}catch{return '';}
 }
-
 
 // A bounded next-byte validation score. Used to reject obviously regressive
 // training updates before they are merged into the community candidate.
