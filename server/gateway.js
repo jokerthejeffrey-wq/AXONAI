@@ -76,6 +76,13 @@ function logGatewayFailure(error) {
     status:status(error?.statusCode || error?.status || error?.response?.status),
     causeName:safe(first?.name),causeCode:safe(first?.code),
     causeStatus:status(first?.statusCode || first?.status),
+    // Temporarily log a short redacted SDK diagnostic for the current outage.
+    // Never log URLs, bearer tokens, credentials, or long opaque strings.
+    hint: String(error?.name)==='GatewayError' ? String(error?.message||'')
+      .replace(/https?:\/\/\S+/gi,'[url]')
+      .replace(/(?:sk-|Bearer\s+)[^\s,;]+/gi,'[credential]')
+      .replace(/\b[A-Za-z0-9_-]{22,}\b/g,'[redacted]')
+      .slice(0,220) : '',
     providerCode,providerType
   }));
 }
