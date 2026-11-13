@@ -4,6 +4,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {mkdtempSync,readFileSync,rmSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
+import {sanitizeTeacherRows} from '../server/train-store.js';
 import {lesson,makeLessons,CURRICULUM_VERSION} from '../server/train-core.js';
 import {sampleNextToken} from '../server/scratch-infer.js';
 
@@ -50,4 +51,27 @@ test('public 1 GB corpus generator is available',()=>{
  assert.match(src,/15_000_001/);
  assert.match(src,/1_073_741_824/);
  assert.match(src,/def lesson\(n\)/);
+});
+
+
+test('offline Python generator produces the same first lessons as the Vercel curriculum',()=>{
+ const folder=mkdtempSync(join(tmpdir(),'axon-python-'));
+ try{
+  const out=join(folder,'examples.txt');
+  execFileSync('python3',['public/downloads/AXON-Corpus-1GB.py','--sample','120','--output',out],{timeout:20000});
+  const lines=readFileSync(out,'utf8').trimEnd().split('\n');
+  assert.equal(lines.length,120);
+  lines.forEach((line,i)=>{
+    const row=lesson(i);
+    assert.equal(line,row.messages[0].content+'\t'+row.response);
+  });
+ }finally{rmSync(folder,{recursive:true,force:true})}
+});
+test('teacher submissions require bounded useful text and reject control chars',()=>{
+ const valid=sanitizeTeacherRows([{question:'How does a CPU work?',answer:'It executes program instructions.'}]);
+ assert.equal(valid.length,1);
+ assert.match(valid[0].digest,/^[a-f0-9]{64}$/);
+ assert.throws(()=>sanitizeTeacherRows([]),/Submit/);
+ assert.throws(()=>sanitizeTeacherRows([{question:'Q',answer:'A'}]),/length/);
+ assert.throws(()=>sanitizeTeacherRows([{question:'Hello world',answer:'hi\nbye'}]),/Control/);
 });
