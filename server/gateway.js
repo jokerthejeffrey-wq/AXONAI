@@ -29,18 +29,14 @@ export function gatewayToken(_req, env = process.env) {
 async function trustedVercelOidcToken(env, getOidcTokenFn) {
   if (!env.VERCEL && !env.VERCEL_OIDC_TOKEN) return '';
   if (getOidcTokenFn) return String((await getOidcTokenFn()) || '').trim();
-  // Vercel injects a short-lived OIDC token into the function environment.
-  // Use it directly before attempting an optional package import, so a
-  // deployment lacking @vercel/oidc does not silently fall back to an invalid
-  // manual AI_GATEWAY_API_KEY.
-  const token = typeof env.VERCEL_OIDC_TOKEN === 'string' ? env.VERCEL_OIDC_TOKEN.trim() : '';
-  if (token) return token;
+  // In a Vercel Function, OIDC is available in the trusted request context,
+  // not necessarily in process.env. Never read a token from browser headers.
   try {
     const {getVercelOidcToken} = await import('@vercel/oidc');
     return String((await getVercelOidcToken()) || '').trim();
-  } catch {
-    // The official AI SDK can also obtain OIDC automatically on Vercel.
-    return '';
+  } catch (error) {
+    console.warn('AXON AI OIDC token unavailable', String(error?.name || 'UnknownError').slice(0,60));
+    return typeof env.VERCEL_OIDC_TOKEN === 'string' ? env.VERCEL_OIDC_TOKEN.trim() : '';
   }
 }
 
@@ -123,6 +119,7 @@ export async function gatewayGenerate(messages, _req, {
     // the trusted short-lived Vercel OIDC credential when it is available.
     const useOidc = Boolean(oidc && createGateway);
     const preferredModel = useOidc ? createGateway({apiKey:oidc})(model) : model;
+    if (!generateTextFn) console.info('AXON AI gateway auth',useOidc?'vercel-oidc':(env.AI_GATEWAY_API_KEY?'manual-key':'not-configured'));
     const options = {
       model:preferredModel,
       messages:chat,
