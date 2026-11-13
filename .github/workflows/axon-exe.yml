@@ -31,6 +31,14 @@ jobs:
           $payload = Get-ChildItem "$env:LOCALAPPDATA/AXONAI" -Directory -Filter 'app-*' | Select-Object -First 1
           python "$($payload.FullName)/trainer/start.pyc" --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install the CPU dependencies through the EXE
+        shell: pwsh
+        run: |
+          & ./exe-build/CPU-AXON.exe --install-only
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $secondLaunch = & ./exe-build/CPU-AXON.exe --install-only
+          $secondLaunch | Write-Host
+          if ($LASTEXITCODE -ne 0 -or ($secondLaunch -join ' ') -notmatch 'Dependencies already installed') { throw 'Dependency reuse failed' }
       - name: Publish only tested executables
         shell: pwsh
         run: |
@@ -48,7 +56,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add public/downloads.html public/downloads/CPU-AXON.exe public/downloads/GPU-AXON.exe public/downloads/SHA256SUMS.txt CPU-AXON.exe GPU-AXON.exe
-          git commit -m 'Publish conversational CPU/GPU EXEs and remove ZIP download'
+          git commit -m 'Publish verified AXONAI CPU and GPU executables'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git push origin HEAD:main
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

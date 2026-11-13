@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Threading;
+using System.Runtime.InteropServices;
 using Microsoft.Win32;
 class Launcher {
  const string Device="__DEVICE__";
@@ -59,9 +60,22 @@ class Launcher {
   }
   return folder;
  }
+ // A mouse selection in the classic Windows console can pause a program's output.
+ [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int handle);
+ [DllImport("kernel32.dll")] static extern bool GetConsoleMode(IntPtr handle,out uint mode);
+ [DllImport("kernel32.dll")] static extern bool SetConsoleMode(IntPtr handle,uint mode);
+ static void DisableQuickEdit(){
+  const int StandardInput=-10;
+  const uint QuickEdit=0x0040,ExtendedFlags=0x0080;
+  var input=GetStdHandle(StandardInput);
+  uint mode;
+  if(GetConsoleMode(input,out mode))SetConsoleMode(input,(mode|ExtendedFlags)&~QuickEdit);
+ }
  static int Main(string[] args){
   bool test=Array.IndexOf(args,"--self-test")>=0,setupOnly=Array.IndexOf(args,"--setup-only")>=0;
+  bool installOnly=Array.IndexOf(args,"--install-only")>=0;
   try{
+   DisableQuickEdit();
    Console.Title="AXONAI Trainer ["+Device+"]";
    Console.WriteLine("AXONAI Trainer ["+Device+"]\n");
    if(!Environment.Is64BitOperatingSystem)throw new Exception("64-bit Windows is required.");
@@ -82,7 +96,8 @@ class Launcher {
    string cli=Quote(Path.Combine(folder,"trainer","start.pyc"))+(Device=="GPU"?" --gpu":"");
    foreach(string arg in args)cli+=" "+Quote(arg);
    int result=Run(python,cli,folder);
-   Console.WriteLine("\nTrainer finished. Press Enter to close.");Console.ReadLine();return result;
-  }catch(Exception e){Console.Error.WriteLine("\nAXONAI: "+e.Message);if(!test&&!setupOnly){Console.WriteLine("Press Enter to close.");Console.ReadLine();}return 1;}
+   if(!installOnly){Console.WriteLine("\nTrainer finished. Press Enter to close.");Console.ReadLine();}
+   return result;
+  }catch(Exception e){Console.Error.WriteLine("\nAXONAI: "+e.Message);if(!test&&!setupOnly&&!installOnly){Console.WriteLine("Press Enter to close.");Console.ReadLine();}return 1;}
  }
 }
