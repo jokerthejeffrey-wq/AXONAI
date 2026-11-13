@@ -42,14 +42,14 @@ def approved(response):
 
 class Teacher:
     def __init__(self, device='cpu'):
+        import os
+        # Set timeouts before importing Transformers, which can load Hub settings.
+        os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '15')
+        os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '90')
         import torch
         from transformers import AutoTokenizer, AutoModelForCausalLM
         self.torch = torch
         self.device = device
-        import os
-        # Set timeouts before importing the Hub, which reads them at import.
-        os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '15')
-        os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '90')
         from huggingface_hub import snapshot_download
         from contextlib import contextmanager
         from threading import Event, Thread
