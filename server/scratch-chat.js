@@ -1,5 +1,6 @@
 // Self-hosted AXON AI: inference uses only checkpoint weights saved on this site.
 import {manifestFor,assemble} from './train-store.js';
+import {randomInt} from 'node:crypto';
 import {sha256} from './train-core.js';
 import {parseCheckpoint,scratchGenerate} from './scratch-infer.js';
 let loaded=null;
@@ -24,7 +25,12 @@ export function readableReply(answer){
 export function localBasics(text){
   const t=String(text).trim().toLowerCase().replace(/[.!?]+$/,'');
   if(/^(hello|hi|hey|hello axon|hi axon|good morning|good evening|good afternoon)$/.test(t))
-    return 'Hello! What would you like to ask?';
+    return [
+      'Hello! What would you like to ask?',
+      'Hello! How can I help you today?',
+      'Hello! What would you like to learn?',
+      'Hello! Have a question for me?'
+    ][randomInt(4)];
   if(/^(what can you help me with|what can you do|help)$/.test(t))
     return 'I can handle basic calculations and explain the AXON AI project. My independently trained language model is still learning.';
   if(/^(explain how ai learns|how does ai learn|how do ai models learn)$/.test(t))
@@ -34,10 +40,17 @@ export function localBasics(text){
   return null;
 }
 export const STILL_TRAINING='AXON AI is still learning. I cannot answer that reliably yet.';
+export const FALLBACK_REPLIES=[
+  STILL_TRAINING,
+  'I do not have enough training to answer that correctly yet.',
+  'That topic is beyond my current training. Try a simpler question.',
+  'I am still working toward a reliable answer to that question.'
+];
+function fallback(){return FALLBACK_REPLIES[randomInt(FALLBACK_REPLIES.length)]}
 export async function scratchAnswer(messages,quality,{load=loadStudent,generate=scratchGenerate}={}){
   const version=Number(quality?.version||0),basic=localBasics(messages.at(-1).content);
   if(basic)return {reply:basic,mode:'local-basic',version};
-  if(!Number.isSafeInteger(version)||version<0)return {reply:STILL_TRAINING,mode:'learning',version:0};
+  if(!Number.isSafeInteger(version)||version<0)return {reply:fallback(),mode:'learning',version:0};
   try{
     const model=await load(version);
     const answer=generate(model,messages,{maxNewTokens:48});
@@ -46,5 +59,5 @@ export async function scratchAnswer(messages,quality,{load=loadStudent,generate=
   }catch(error){
     console.error('AXON scratch model:',String(error?.name||'Error').slice(0,32));
   }
-  return {reply:STILL_TRAINING,mode:'learning',version};
+  return {reply:fallback(),mode:'learning',version};
 }
