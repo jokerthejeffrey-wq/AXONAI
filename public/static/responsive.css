@@ -1,0 +1,126 @@
+/* Responsive AXON AI layout: phones, tablets, compact landscape screens. */
+html,body{max-width:100%;overflow-x:clip}
+a,button{touch-action:manipulation}
+@media(max-width:1024px){
+  nav,.chat-header{min-width:0}
+  .wrap{padding-left:clamp(18px,3.5vw,32px);padding-right:clamp(18px,3.5vw,32px)}
+  .navlinks{gap:17px}
+  .herogrid{min-height:min(68svh,580px);padding:50px 28px}
+  .hero h1{font-size:clamp(46px,7vw,76px);letter-spacing:-.045em}
+  .progress-wrap{grid-template-columns:minmax(210px,270px) minmax(0,1fr);gap:clamp(20px,4vw,45px);padding:clamp(20px,3vw,32px)}
+  .ringbox{width:min(100%,270px);height:auto;aspect-ratio:1}
+  .ringmid .pct{font-size:clamp(35px,5vw,49px)}
+  .crow{grid-template-columns:minmax(75px,100px) minmax(0,1fr) auto;gap:12px}
+  .feeditem{min-width:0}
+}
+@media(max-width:760px){
+  header nav{height:64px;gap:12px}
+  .logo{min-width:0;white-space:nowrap;font-size:19px}
+  .logo .axon-mark{width:25px;height:25px}
+  .nav-actions{gap:9px;flex-shrink:0}
+  .theme-toggle{width:44px;height:44px}
+  .try-button{min-height:44px;gap:9px;padding:10px 14px;font-size:12px}
+  .hero{margin:8px 8px 0}
+  .herogrid{min-height:min(72svh,610px);padding:42px clamp(18px,5vw,28px) 50px}
+  .hero-in{min-width:0;max-width:100%;padding:20px 0}
+  .hero h1{font-size:clamp(40px,10vw,66px);letter-spacing:-.052em;overflow-wrap:normal}
+  .hero p{font-size:clamp(12px,2.8vw,15px);max-width:32ch;line-height:1.65}
+  .hero-actions{max-width:520px;margin:28px auto 0;gap:10px}
+  .hero .btn{min-height:46px;max-width:100%;white-space:normal}
+  .hero-meta{display:none}
+  section{padding:clamp(44px,8vw,65px) 0}
+  .section-head{margin-bottom:30px}
+  .section-head h2{font-size:clamp(27px,6.5vw,37px);line-height:1.13;letter-spacing:-.035em}
+  .section-head p{font-size:14px}
+  .strip .stat{padding:clamp(16px,4vw,24px);min-width:0}
+  .stat .n{font-size:clamp(23px,5.3vw,30px)}
+  .stat .l{line-height:1.4}
+  .traincard{padding:clamp(20px,5vw,30px);min-width:0}
+  .traincard p{min-height:0}
+  .traincard .btn{min-height:46px}
+  .specs div{gap:12px;align-items:baseline}
+  .specs div>*{min-width:0;overflow-wrap:anywhere}
+  .progress-wrap{grid-template-columns:1fr;gap:22px}
+  .ringbox{width:min(68vw,240px)}
+  .compare{min-width:0;gap:22px}
+  .comparetitle,.checkpoint{flex-wrap:wrap;row-gap:9px}
+  .architecture{display:grid;grid-template-columns:1fr;gap:8px;margin-top:24px}
+  .architecture div{min-width:0}
+  .architecture>span{display:none}
+  .architecture p{font-size:11px}
+  .feeditem{padding:19px}
+  .cta{flex-wrap:wrap;align-items:flex-start}
+  .cta .btn{min-height:44px}
+  .footrow{align-items:flex-start}
+  .footlinks{line-height:1.7}
+}
+@media(max-width:480px){
+  .wrap{padding-left:17px;padding-right:17px}
+  .nav-actions{gap:6px}
+  .hero h1{font-size:clamp(38px,11vw,53px)}
+  .hero-actions{flex-direction:column;align-items:stretch}
+  .hero-actions .btn{width:100%;justify-content:center}
+  .hero .btn{padding:13px 16px;font-size:12px}
+  .stripgrid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .statusline{flex-wrap:wrap;row-gap:6px;font-size:9px}
+  .progress-wrap{padding:20px 15px}
+  .crow{grid-template-columns:minmax(64px,82px) minmax(0,1fr) 38px;gap:7px}
+  .crow .nm{font-size:11px;overflow-wrap:anywhere}
+  .crow .val{font-size:10px}
+  .ringbox{width:min(70vw,226px)}
+  .gridreveal{height:120px}
+  .footlinks{gap:10px 18px}
+}
+@media(max-width:350px){
+  .try-button{padding:9px 10px;gap:6px}
+  .logo{font-size:17px;gap:6px}
+  .logo .axon-mark{width:22px;height:22px}
+  .hero h1{font-size:36px}
+  .specs div{font-size:11px}
+}
+@media(orientation:landscape) and (max-height:500px) and (max-width:1000px){
+  .herogrid{min-height:380px;padding-block:35px}
+}
+/* Chat view */
+@media(max-width:900px){
+  #thread{width:100%;max-width:750px}
+  .chat-header{padding-inline:clamp(16px,4vw,28px)}
+  .composer-area{width:100%;max-width:750px}
+}
+@media(max-width:600px){
+  .chat-header{height:64px;padding-inline:16px}
+  .chat-header .brand{font-size:16px;gap:8px;min-width:0}
+  .chat-header .brand svg{width:24px;height:24px;flex-shrink:0}
+  #new{min-height:44px;padding:0 13px;font-size:11px}
+  #thread{padding:96px 17px 195px}
+  #welcome{padding-top:min(9svh,62px)}
+  #welcome h1{font-size:clamp(32px,8vw,41px);line-height:1.15;letter-spacing:-.045em}
+  #welcome p{padding-inline:4px;line-height:1.5}
+  .suggestions{display:grid;grid-template-columns:1fr;gap:9px;margin-top:28px;margin-bottom:28px}
+  .suggestions button{width:100%;min-height:46px;padding:12px 16px;text-align:center;font-size:12px}
+  .message{font-size:14px;line-height:1.65}
+  .message.user{max-width:94%;padding:12px 14px}
+  .composer-area{padding:10px 12px calc(12px + env(safe-area-inset-bottom,0px))}
+  #composer{gap:7px;padding:8px;min-height:54px}
+  #prompt{font-size:16px;line-height:23px;min-height:37px}
+  #send{min-width:42px;width:42px;height:42px;flex-basis:42px}
+  .note{font-size:10px;line-height:1.45;margin-top:9px}
+}
+@media(max-width:370px){
+  .chat-header .brand{font-size:14px}
+  #new{font-size:0;gap:0;padding:0;width:44px}
+  #new span{font-size:22px}
+  #welcome h1{font-size:30px}
+}
+/* Downloads */
+@media(max-width:660px){
+  body:has(.items) main{margin:14px auto;padding:18px 17px}
+  body:has(.items) h1{font-size:clamp(31px,8vw,40px);margin:25px 0 24px}
+  .items{grid-template-columns:minmax(0,1fr)!important;gap:12px}
+  .item{min-width:0;padding:22px;min-height:170px}
+  .item h2{font-size:24px}
+  .item .dl{width:100%;min-height:46px}
+}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+}
