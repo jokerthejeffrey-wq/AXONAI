@@ -17,13 +17,14 @@ function connection(){check(configured(),'Training storage is not configured.',5
 async function setup(sql){
   // Calls are safe if multiple serverless instances start at the same time.
   await sql`CREATE TABLE IF NOT EXISTS axon_meta (key text primary key, val bigint not null)`;
-  await sql`INSERT INTO axon_meta(key,val) VALUES ('version',0),('sequence',0) ON CONFLICT (key) DO NOTHING`;
+  await sql`INSERT INTO axon_meta(key,val) VALUES ('version',0),('sequence',0),('corpus_sequence',0) ON CONFLICT (key) DO NOTHING`;
   await sql`CREATE TABLE IF NOT EXISTS axon_jobs (
     id text primary key, worker text not null, version bigint not null, issued_at timestamptz not null default now(),
     secret_hash text not null, status text not null default 'issued', rows jsonb not null,
     size bigint, sha256 text, submitted_at timestamptz, merged_version bigint,
     constraint axon_jobs_status CHECK(status IN ('issued','pending','approved','rejected'))
   )`;
+  await sql`ALTER TABLE axon_jobs ADD COLUMN IF NOT EXISTS corpus jsonb`;
   await sql`CREATE TABLE IF NOT EXISTS axon_parts (
     job_id text not null references axon_jobs(id), part_index integer not null,
     url text not null, size integer not null, primary key(job_id,part_index)
@@ -68,11 +69,12 @@ export async function quality(){
   return {tested:!!q?.tested,ready:false,score:q?.tested?Number(q.score):null,version:status.version,
     passed:q?.passed??0,total:q?.total??0,checked_at:q?.checked_at??null,review:q?.tested?'reviewed':'pending'};
 }
-export async function claim(worker){
+export async function claim(worker,corpus=null){
+  if(corpus)check(corpus.id==='smoltalk-v1'&&corpus.revision==='2ca82d2fe63c017af8d4cb30e81e95cb25516851'&&Number.isSafeInteger(corpus.records)&&corpus.records>=8&&corpus.records<=1_000_000,'Unsupported corpus');
   check(workerOK(worker),'Invalid worker identifier');
   const sql=await db();
   let [pending]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
-  if(Number(pending.n)>=PENDING_QUEUE_LIMIT){
+  if(Number(pending.n)>0){
     try{await autoReviewOne(sql)}
     catch(error){console.error('AXON queue verification deferred:',String(error?.name||'Error').slice(0,45))}
     ;[pending]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
@@ -83,11 +85,15 @@ export async function claim(worker){
   const [quota]=await sql`UPDATE axon_daily SET claims=claims+1 WHERE day=CURRENT_DATE AND claims<96 RETURNING claims`;
   if(!quota)return null; // All daily lessons reserved: allow old trainers to exit without an endless 429 loop.
   const [v]=await sql`SELECT val FROM axon_meta WHERE key='version'`;
-  const [seq]=await sql`UPDATE axon_meta SET val=val+${BATCH} WHERE key='sequence' RETURNING val-${BATCH} AS start`;
+  const key=corpus?'corpus_sequence':'sequence';
+  const [seq]=await sql`UPDATE axon_meta SET val=val+${BATCH} WHERE key=${key}
+    AND val+${BATCH}<=${corpus?corpus.records:Number.MAX_SAFE_INTEGER} RETURNING val-${BATCH} AS start`;
+  if(!seq)return null;
   const id=crypto.randomBytes(16).toString('hex'),secret=crypto.randomBytes(32).toString('hex');
-  const rows=makeLessons(Number(seq.start));
-  await sql`INSERT INTO axon_jobs(id,worker,version,secret_hash,rows) VALUES(${id},${worker},${Number(v.val)},${sha256(Buffer.from(secret))},${JSON.stringify(rows)}::jsonb)`;
-  return {id,version:Number(v.val),manifest:MANIFEST,rows,upload_token:secret};
+  const assignment=corpus?{id:corpus.id,revision:corpus.revision,start:Number(seq.start),count:BATCH}:null;
+  const rows=assignment?[]:makeLessons(Number(seq.start));
+  await sql`INSERT INTO axon_jobs(id,worker,version,secret_hash,rows,corpus) VALUES(${id},${worker},${Number(v.val)},${sha256(Buffer.from(secret))},${JSON.stringify(rows)}::jsonb,${JSON.stringify(assignment)}::jsonb)`;
+  return {id,version:Number(v.val),manifest:MANIFEST,rows,corpus:assignment,upload_token:secret};
 }
 async function authorizedJob(sql,id,secret){
   check(idOK(id)&&tokenOK(secret),'Invalid job authorization',401);

@@ -1,3 +1,4 @@
+import {sampleToken} from './sampling.js';
 // AXON's from-scratch byte-level transformer inference; no pretrained model API.
 import {TextDecoder} from 'node:util';
 const W=256,H=8,D=32,V=260,C=512,L=4,END=259,USER=257,ASSISTANT=258,PAD=256;
@@ -109,7 +110,7 @@ export function encodeMessages(messages,{maxInputTokens=192}={}){
   if(tokens.length>maxInputTokens)throw Error('Message too long for the scratch model');
   return tokens;
 }
-export function scratchGenerate(checkpoint,messages,{maxNewTokens=48}={}){
+export function scratchGenerate(checkpoint,messages,{maxNewTokens=128,...sampling}={}){
   if(!Number.isInteger(maxNewTokens)||maxNewTokens<1||maxNewTokens>128)throw Error('Invalid generation limit');
   const model=Buffer.isBuffer(checkpoint)?parseCheckpoint(checkpoint):checkpoint;
   const cache=model.layers.map(()=>({k:[],v:[]})),tokens=encodeMessages(messages);
@@ -117,11 +118,7 @@ export function scratchGenerate(checkpoint,messages,{maxNewTokens=48}={}){
   for(const token of tokens)logits=logitsForToken(model,token,cache);
   const out=[];
   for(let t=0;t<maxNewTokens;t++){
-    let winner=-1,top=-Infinity;
-    for(let i=0;i<V;i++){
-      if(i===PAD||i===USER||i===ASSISTANT)continue;
-      if(logits[i]>top){top=logits[i];winner=i;}
-    }
+    const winner=sampleToken(logits,out,sampling);
     if(winner===END)break;
     out.push(winner);
     logits=logitsForToken(model,winner,cache);
@@ -149,4 +146,20 @@ export function scoreNextByte(modelOrBytes,messages,expectedByte){
   const loss=largest+Math.log(denominator)-logits[expectedByte];
   if(!Number.isFinite(loss)||loss<0||loss>1000)throw Error('Invalid validation loss');
   return loss;
+}
+
+export async function* scratchStream(checkpoint,messages,{maxNewTokens=128,...sampling}={}){
+ if(!Number.isInteger(maxNewTokens)||maxNewTokens<1||maxNewTokens>128)throw Error('Invalid generation limit');
+ const model=Buffer.isBuffer(checkpoint)?parseCheckpoint(checkpoint):checkpoint;
+ const cache=model.layers.map(()=>({k:[],v:[]})),ids=encodeMessages(messages),out=[];
+ const text=new TextDecoder('utf-8');let logits;
+ for(const id of ids)logits=logitsForToken(model,id,cache);
+ for(let i=0;i<maxNewTokens;i++){
+  const id=sampleToken(logits,out,sampling);if(id===END)break;out.push(id);
+  const delta=text.decode(Uint8Array.of(id),{stream:true});if(delta)yield delta;
+  // Yield the event loop so network chunks can actually leave the server.
+  await new Promise(resolve=>setImmediate(resolve));
+  logits=logitsForToken(model,id,cache);
+ }
+ const tail=text.decode();if(tail)yield tail;
 }

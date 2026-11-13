@@ -59,10 +59,11 @@ def tensors(row,device,context=None):
     y=torch.tensor([seq[1:]],device=device);y[:,:len(prefix)-1]=-100
     return x,y
 
-def train(model,rows,device):
+def train(model,rows,device,before_step=None):
     """Exactly ONE optimizer step per assigned lesson; no epochs/replacement sampling."""
     model.train();opt=torch.optim.AdamW(model.parameters(),lr=3e-4,weight_decay=.01)
     for i,row in enumerate(rows):
+        if before_step:before_step()
         x,y=tensors(row,device,model.config['context']);opt.zero_grad(set_to_none=True)
         loss=F.cross_entropy(model(x).reshape(-1,260),y.reshape(-1),ignore_index=-100)
         if not torch.isfinite(loss):raise ValueError('Nonfinite loss; update not uploaded')

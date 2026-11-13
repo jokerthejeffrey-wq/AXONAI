@@ -1,0 +1,7 @@
+node_modules/
+__pycache__/
+*.pyc
+.trainer-cpu/
+.trainer-gpu/
+.env
+.env.*
