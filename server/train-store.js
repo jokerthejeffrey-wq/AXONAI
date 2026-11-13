@@ -81,7 +81,7 @@ export async function claim(worker){
   }
   await sql`INSERT INTO axon_daily(day,claims) VALUES(CURRENT_DATE,0) ON CONFLICT DO NOTHING`;
   const [quota]=await sql`UPDATE axon_daily SET claims=claims+1 WHERE day=CURRENT_DATE AND claims<96 RETURNING claims`;
-  check(!!quota,'Daily training capacity reached. Try tomorrow.',429);
+  if(!quota)return null; // All daily lessons reserved: allow old trainers to exit without an endless 429 loop.
   const [v]=await sql`SELECT val FROM axon_meta WHERE key='version'`;
   const [seq]=await sql`UPDATE axon_meta SET val=val+${BATCH} WHERE key='sequence' RETURNING val-${BATCH} AS start`;
   const id=crypto.randomBytes(16).toString('hex'),secret=crypto.randomBytes(32).toString('hex');
