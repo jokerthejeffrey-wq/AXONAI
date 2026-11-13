@@ -29,6 +29,12 @@ export function gatewayToken(_req, env = process.env) {
 async function trustedVercelOidcToken(env, getOidcTokenFn) {
   if (!env.VERCEL && !env.VERCEL_OIDC_TOKEN) return '';
   if (getOidcTokenFn) return String((await getOidcTokenFn()) || '').trim();
+  // Vercel injects a short-lived OIDC token into the function environment.
+  // Use it directly before attempting an optional package import, so a
+  // deployment lacking @vercel/oidc does not silently fall back to an invalid
+  // manual AI_GATEWAY_API_KEY.
+  const token = typeof env.VERCEL_OIDC_TOKEN === 'string' ? env.VERCEL_OIDC_TOKEN.trim() : '';
+  if (token) return token;
   try {
     const {getVercelOidcToken} = await import('@vercel/oidc');
     return String((await getVercelOidcToken()) || '').trim();
@@ -58,7 +64,7 @@ export function classifyGatewayError(error) {
   if (status === 404 || status === 400) return new GatewayError('The selected model is not available.','model_unavailable');
   if (status === 429 || code.includes('ratelimit')) return new GatewayError('AI Gateway is busy.','rate_limited',503,true);
   if (status === 408 || status === 504 || code.includes('timeout') || code.includes('abort')) return new GatewayError('The model request timed out.','timeout',504,true);
-  if (code.includes('api key') || code.includes('no credentials') || code.includes('missing_credential')) return new GatewayError('AI Gateway authentication is missing.','auth_missing');
+  if (code.includes('api key') || code.includes('no credentials') || code.includes('missing_credential') || code.includes('no api key') || code.includes('missing token')) return new GatewayError('AI Gateway authentication is missing.','auth_missing');
   return new GatewayError('AI Gateway is temporarily unavailable.','upstream');
 }
 
