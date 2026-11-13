@@ -1,25 +1,10 @@
+import {curriculumExample} from './curriculum.js';
 import crypto from 'node:crypto';
 export const CHUNK_BYTES=2_500_000; // below Vercel's 4.5 MB request limit
 export const MAX_CHECKPOINT=32*1024*1024;
 export const BATCH=8;
 export const MANIFEST={protocol:2,architecture:{vocab_size:260,width:256,layers:4,heads:8,context:512},tokenizer:'utf8-bytes-v1',max_uses:1};
-export function lesson(n) {
-  if(n===0)return {concept:'greeting',messages:[{role:'user',content:'hello'}],response:'Hello!'};
-  const op=(n-1)%9, k=Math.floor((n-1)/9)+2;
-  const cases=[
-    ['addition',`What is ${k} + ${k+3}?`,String(2*k+3)],
-    ['subtraction',`Calculate ${k+20} minus ${k}.`,'20'],
-    ['multiplication',`What is ${k} times 7?`,String(k*7)],
-    ['parity',`Is ${k} an even or odd number?`,k%2?'odd':'even'],
-    ['comparison',`Which is larger, ${k+1} or ${k+2}?`,String(k+2)],
-    ['division',`What is ${k*3} divided by 3?`,String(k)],
-    ['unit conversion',`How many centimeters are in ${k} meters?`,String(k*100)],
-    ['square',`What is ${k} squared?`,String(k*k)],
-    ['binary',`Write ${k} in binary.`,k.toString(2)],
-  ];
-  const [concept,content,response]=cases[op];
-  return {concept,messages:[{role:'user',content}],response};
-}
+export function lesson(n){const e=curriculumExample(n);return {concept:e.concept,messages:e.messages,response:e.response};}
 export function makeLessons(start){return Array.from({length:BATCH},(_,i)=>lesson(start+i));}
 export function sha256(buffer){return crypto.createHash('sha256').update(buffer).digest('hex');}
 export function idOK(id){return typeof id==='string' && /^[a-f0-9]{32}$/.test(id);}
