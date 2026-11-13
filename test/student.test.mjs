@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,existsSync} from 'node:fs';
 import {parseCheckpoint,scratchGenerate,encodeMessages} from '../server/scratch-infer.js';
-import {scratchAnswer,localBasics,STILL_TRAINING,readableReply} from '../server/scratch-chat.js';
+import {scratchAnswer,localBasics,STILL_TRAINING,FALLBACK_REPLIES,readableReply} from '../server/scratch-chat.js';
 import chat from '../api/chat.js';
 import status from '../api/status.js';
 function response(){return {code:200,headers:{},body:null,setHeader(k,v){this.headers[k]=v;return this},status(n){this.code=n;return this},json(x){this.body=x;return this}}}
@@ -31,7 +31,7 @@ test('Actual scratch checkpoint parses and generates entirely in-process',()=>{
 test('Untrained checkpoint never pretends to have learned answers',async()=>{
  const a=await scratchAnswer([{role:'user',content:'what is the temperature on Mars?'}],{version:0},
   {load:async()=>({}),generate:()=>'This could be a confident hallucination.'});
- assert.equal(a.mode,'learning');assert.equal(a.reply,STILL_TRAINING);
+ assert.equal(a.mode,'learning');assert.ok(FALLBACK_REPLIES.includes(a.reply));
  assert.equal(readableReply('ñøñ%%%'),false);
 });
 test('Status shows no Gateway dependency',async()=>{
