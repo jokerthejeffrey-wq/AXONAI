@@ -4,9 +4,9 @@ import chat from '../api/chat.js';
 import status from '../api/status.js';
 import {validateMessages,identityAnswer} from '../server/config.js';
 function response(){return {code:200,headers:{},body:null,setHeader(k,v){this.headers[k]=v;return this},status(n){this.code=n;return this},json(x){this.body=x;return this}}}
-test('Creator attribution credits community and discloses pretrained help',()=>{
+test('Creator attribution credits community and discloses its own scratch model',()=>{
  for(const q of ['Who created you?','who did create you','Who made you?']){
-  const a=identityAnswer(q);assert.match(a,/community/);assert.match(a,/pretrained/);assert.doesNotMatch(a,/Anthropic/);
+  const a=identityAnswer(q);assert.match(a,/community/);assert.match(a,/from-scratch/);assert.doesNotMatch(a,/Anthropic/);
  }
 });
 test('Conversation validation rejects malformed roles and oversized input',()=>{
@@ -17,7 +17,7 @@ test('Conversation validation rejects malformed roles and oversized input',()=>{
 });
 test('Chat identity endpoint works without a model or external backend',async()=>{
  const res=response();await chat({method:'POST',headers:{},body:{messages:[{role:'user',content:'Who created you?'}]}},res);
- assert.equal(res.code,200);assert.equal(res.body.mode,'identity');assert.match(res.body.reply,/community/);
+ assert.equal(res.code,200);assert.equal(res.body.mode,'local-basic');assert.match(res.body.reply,/community/);
 });
 test('Method and JSON errors are useful JSON responses',async()=>{
  let res=response();await chat({method:'GET',headers:{}},res);assert.equal(res.code,405);
