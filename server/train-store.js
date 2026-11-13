@@ -33,6 +33,7 @@ async function setup(sql){
   )`;
   await sql`CREATE TABLE IF NOT EXISTS axon_daily (day date primary key, claims integer not null default 0)`;
   await sql`CREATE TABLE IF NOT EXISTS axon_queue_lease (id integer primary key, owner text not null, locked_until timestamptz not null)`;
+  await sql`CREATE TABLE IF NOT EXISTS axon_teacher_examples (digest text primary key, question text not null, answer text not null, used boolean not null default false)`;
   await sql`INSERT INTO axon_queue_lease (id,owner,locked_until) VALUES (1,'',to_timestamp(0)) ON CONFLICT DO NOTHING`;
   await sql`CREATE TABLE IF NOT EXISTS axon_quality (
     version bigint primary key, score integer, passed integer, total integer, tested boolean not null default false,
@@ -85,7 +86,15 @@ export async function claim(worker){
   const [v]=await sql`SELECT val FROM axon_meta WHERE key='version'`;
   const [seq]=await sql`UPDATE axon_meta SET val=val+${BATCH} WHERE key='sequence' RETURNING val-${BATCH} AS start`;
   const id=crypto.randomBytes(16).toString('hex'),secret=crypto.randomBytes(32).toString('hex');
-  const rows=makeLessons(Number(seq.start));
+  const extra=await sql`WITH picked AS (
+      SELECT digest FROM axon_teacher_examples WHERE used=false
+      ORDER BY digest LIMIT ${BATCH} FOR UPDATE SKIP LOCKED
+    ) UPDATE axon_teacher_examples e SET used=true FROM picked
+    WHERE e.digest=picked.digest RETURNING e.question,e.answer`;
+  const rows=[
+    ...extra.map(e=>({concept:'approved local teacher',messages:[{role:'user',content:e.question}],response:e.answer})),
+    ...makeLessons(Number(seq.start)).slice(0,BATCH-extra.length)
+  ];
   await sql`INSERT INTO axon_jobs(id,worker,version,secret_hash,rows) VALUES(${id},${worker},${Number(v.val)},${sha256(Buffer.from(secret))},${JSON.stringify(rows)}::jsonb)`;
   return {id,version:Number(v.val),manifest:MANIFEST,rows,upload_token:secret};
 }
@@ -256,4 +265,29 @@ async function autoReviewOne(sql){
     await sql`UPDATE axon_queue_lease SET owner='',locked_until=to_timestamp(0)
       WHERE id=1 AND owner=${owner}`;
   }
+}
+
+
+export function sanitizeTeacherRows(rows){
+  check(Array.isArray(rows)&&rows.length>=1&&rows.length<=16,'Submit 1–16 teacher examples');
+  return rows.map((row,i)=>{
+    check(row&&typeof row==='object'&&!Array.isArray(row),'Invalid teacher example '+i);
+    const question=String(row.question||'').trim(),answer=String(row.answer||'').trim();
+    check(question.length>=5&&question.length<=160&&answer.length>=5&&answer.length<=220,'Invalid teacher example length');
+    check(Buffer.byteLength(question,'utf8')<=190&&Buffer.byteLength(answer,'utf8')<=250,'Teacher example too long for student context');
+    check(!/[\u0000-\u001f\u007f]/u.test(question+answer),'Control characters not allowed');
+    return {question,answer,digest:sha256(Buffer.from(question.toLocaleLowerCase('en')+'\0'+answer))};
+  });
+}
+export async function importTeacherRows(owner,rows){
+  check(typeof owner==='string'&&owner===process.env.AXON_OWNER_TOKEN&&owner.length>=32,'Unauthorized',401);
+  const clean=sanitizeTeacherRows(rows),sql=await db();
+  let accepted=0;
+  for(const row of clean){
+    const inserted=await sql`INSERT INTO axon_teacher_examples(digest,question,answer)
+      VALUES(${row.digest},${row.question},${row.answer})
+      ON CONFLICT (digest) DO NOTHING RETURNING digest`;
+    accepted+=inserted.length;
+  }
+  return {accepted,duplicates:clean.length-accepted};
 }
