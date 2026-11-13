@@ -118,7 +118,24 @@ export async function gatewayGenerate(messages, _req, {
     // An accidentally configured invalid AI_GATEWAY_API_KEY must not override
     // the trusted short-lived Vercel OIDC credential when it is available.
     const useOidc = Boolean(oidc && createGateway);
-    const preferredModel = useOidc ? createGateway({apiKey:oidc})(model) : model;
+    const preferredModel = useOidc ? createGateway({
+      apiKey:oidc,
+      // Log only gateway response status and a small machine-readable error
+      // category, never headers, prompts, request payloads or credentials.
+      fetch: async (input, init) => {
+        const response = await fetch(input,init);
+        if(!response.ok){
+          let category='';
+          try {
+            const body=await response.clone().json();
+            category=String(body?.error?.code||body?.error?.type||body?.code||'')
+              .replace(/[^a-zA-Z0-9_-]/g,'').slice(0,55);
+          } catch {}
+          console.error('AXON Gateway HTTP failure',response.status,category);
+        }
+        return response;
+      }
+    })(model) : model;
     if (!generateTextFn) console.info('AXON AI gateway auth',useOidc?'vercel-oidc':(env.AI_GATEWAY_API_KEY?'manual-key':'not-configured'));
     const options = {
       model:preferredModel,
