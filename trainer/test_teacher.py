@@ -24,6 +24,68 @@ class ReviewerTests(unittest.TestCase):
         teacher._ask=respond
         return teacher,history
 
+    def test_local_checker_loader_reuses_snapshot_and_modern_dtype(self):
+        import sys
+        from types import ModuleType
+        from unittest.mock import patch
+        models,tokenizers,downloads=[],[],[]
+        class FakeModel:
+            def to(self, device):
+                self.device=device
+                return self
+            def eval(self):return self
+        class Model:
+            @staticmethod
+            def from_pretrained(*args, **kwargs):
+                models.append((args,kwargs))
+                return FakeModel()
+        class Tokenizer:
+            @staticmethod
+            def from_pretrained(*args, **kwargs):
+                tokenizers.append((args,kwargs))
+                return object()
+        mock_torch=ModuleType('torch')
+        mock_torch.float16='float16'
+        mock_hub=ModuleType('huggingface_hub')
+        def snapshot_download(**kwargs):
+            downloads.append(kwargs)
+            return '/fake/cached/checker'
+        mock_hub.snapshot_download=snapshot_download
+        mock_transformers=ModuleType('transformers')
+        mock_transformers.AutoTokenizer=Tokenizer
+        mock_transformers.AutoModelForCausalLM=Model
+        with patch.dict(sys.modules, {'torch':mock_torch,
+                                      'huggingface_hub':mock_hub,
+                                      'transformers':mock_transformers}):
+            teacher=Teacher('cpu')
+        self.assertIsNotNone(teacher.model)
+        self.assertEqual(len(downloads),1)
+        self.assertEqual(downloads[0]['max_workers'],2)
+        self.assertEqual(len(models),1)
+        self.assertEqual(models[0][1]['dtype'],'float16')
+        self.assertNotIn('torch_dtype',models[0][1])
+        self.assertEqual(models[0][1]['local_files_only'],True)
+        self.assertEqual(tokenizers[0][1]['local_files_only'],True)
+
+    def test_checker_download_failure_is_actionable(self):
+        import sys
+        from types import ModuleType
+        from unittest.mock import patch
+        mock_torch=ModuleType('torch')
+        mock_torch.float16='float16'
+        mock_hub=ModuleType('huggingface_hub')
+        def fail(**kwargs):
+            raise OSError('simulated network problem')
+        mock_hub.snapshot_download=fail
+        mock_transformers=ModuleType('transformers')
+        mock_transformers.AutoTokenizer=object
+        mock_transformers.AutoModelForCausalLM=object
+        with patch.dict(sys.modules, {'torch':mock_torch,
+                                      'huggingface_hub':mock_hub,
+                                      'transformers':mock_transformers}):
+            with self.assertRaisesRegex(RuntimeError,'Checker download failed'):
+                Teacher('cpu')
+
     def test_double_review_required_before_training(self):
         teacher,history=self.fake()
         row=teacher.generate_checked(self.sample(),24)
