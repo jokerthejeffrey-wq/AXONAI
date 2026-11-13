@@ -46,13 +46,57 @@ class Teacher:
         from transformers import AutoTokenizer, AutoModelForCausalLM
         self.torch = torch
         self.device = device
+        from huggingface_hub import snapshot_download
+        from contextlib import contextmanager
+        from threading import Event, Thread
+        import time
+        import os
+
+        # The Hub reuses files already present in the user's cache. The
+        # download can be large; only select files needed for inference.
+        os.environ.setdefault('HF_HUB_ETAG_TIMEOUT', '15')
+        os.environ.setdefault('HF_HUB_DOWNLOAD_TIMEOUT', '90')
+
+        @contextmanager
+        def loading_progress(label):
+            finished = Event()
+            started = time.monotonic()
+
+            def show_elapsed():
+                while not finished.wait(8):
+                    seconds = int(time.monotonic() - started)
+                    print(f'\\r{label} | elapsed {seconds // 60}m {seconds % 60}s',
+                          end='', flush=True)
+
+            pulse = Thread(target=show_elapsed, daemon=True)
+            pulse.start()
+            try:
+                yield
+            finally:
+                finished.set()
+                pulse.join(timeout=1)
+                print(flush=True)
+
+        print('Checking local pretrained checker files...', flush=True)
+        with loading_progress('Downloading checker files'):
+            # Pre-download from the pinned version. Hugging Face displays a
+            # real file-transfer progress bar; successful downloads are cached.
+            cache_path = snapshot_download(
+                repo_id=TEACHER, revision=REVISION,
+                allow_patterns=['*.json', '*.safetensors', '*.model',
+                                '*.txt', '*.tiktoken'],
+                max_workers=2)
+        print('Checker files ready. Initializing tokenizer...', flush=True)
         self.tokenizer = AutoTokenizer.from_pretrained(
-            TEACHER, revision=REVISION, trust_remote_code=False)
-        self.model = AutoModelForCausalLM.from_pretrained(
-            TEACHER, revision=REVISION, trust_remote_code=False,
-            use_safetensors=True, torch_dtype=torch.float16,
-            low_cpu_mem_usage=True,
-            attn_implementation='eager').to(device).eval()
+            cache_path, local_files_only=True, trust_remote_code=False)
+        print('Initializing pretrained checker on CPU...', flush=True)
+        with loading_progress('Loading checker weights'):
+            self.model = AutoModelForCausalLM.from_pretrained(
+                cache_path, local_files_only=True, trust_remote_code=False,
+                use_safetensors=True, dtype=torch.float16,
+                low_cpu_mem_usage=True,
+                attn_implementation='eager').to(device).eval()
+        print('Pretrained checker ready.', flush=True)
 
     def _ask(self, system, user, max_new_tokens=120):
         messages = [{'role': 'system', 'content': system},
