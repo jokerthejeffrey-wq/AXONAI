@@ -15,31 +15,31 @@ def request(session,method,url,**kwargs):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--device',choices=['cpu','cuda'],default='cpu');p.add_argument('--server',default='https://axonai-theta.vercel.app');p.add_argument('--rounds',type=int,default=100)
-    p.add_argument('--cache',default=str(Path.home()/'.axonai'/'smoltalk-v1'));p.add_argument('--yes',action='store_true');p.add_argument('--teacher-check',action='store_true');args=p.parse_args()
+    p.add_argument('--cache',default=str(Path.home()/'.axonai'/'smoltalk-v1'));p.add_argument('--yes',action='store_true');args=p.parse_args()
     from urllib.parse import urlparse
     parsed=urlparse(args.server)
     if parsed.scheme!='https' or parsed.username or parsed.password:p.error('An HTTPS coordinator URL is required')
     if not 1<=args.rounds<=1000:p.error('Rounds must be 1..1000')
-    print('Downloads up to 1 GB conversational TXT plus dependencies and checkpoints. Dataset cache/index requires additional disk space. Uses your CPU/GPU and uploads student weights.')
-    if not args.yes and input('Start? [y/N] ').lower()!='y':return
+    print('Training: local conversational corpus, pretrained two-pass checker, full-model weight updates.')
+    print('Downloads are cached locally. Press Ctrl+C to stop.', flush=True)
     wait(512);info=prepare(args.cache)
     wait(512)
-    from trainer.numpy_student import Student
-    if args.device == 'cuda':
-        print('Using NVIDIA GPU with CuPy.', flush=True)
-    else:
-        print('Using NumPy CPU training.', flush=True)
-    teacher = None
-    if args.teacher_check:
-        wait(2400)
-        from trainer.teacher import Teacher
-        print('Loading local pretrained reviewer (two independent checks).', flush=True)
-        teacher=Teacher('cpu')
+    import torch
+    from student import Student, load_weights, snapshot, train as train_model
+    from safetensors.torch import save_file
+    if args.device == 'cuda' and not torch.cuda.is_available():
+        raise RuntimeError('NVIDIA CUDA is unavailable. Launch CPU-AXON.exe instead.')
+    torch.set_num_threads(min(4,max(1,os.cpu_count() or 1)))
+    print('Training full AXON transformer on '+args.device.upper()+'.', flush=True)
+    wait(2300)
+    from trainer.teacher import Teacher
+    print('Loading pretrained checker on this computer.', flush=True)
+    teacher=Teacher('cpu')
     worker_file=Path(args.cache)/'worker-id'
     if not worker_file.exists():worker_file.write_text(str(uuid.uuid4()))
     worker=worker_file.read_text().strip();session=requests.Session();base=args.server.rstrip('/')
     try:
-        model=Student(args.device)
+        model=Student().to(args.device)
         for n in range(args.rounds):
             wait(512)
             r=request(session,'POST',base+'/api/job',json={'worker':worker,'corpus':info})
@@ -87,15 +87,15 @@ def main():
                                 if size>32*1024**2:raise RuntimeError('Oversized checkpoint')
                                 out.write(block);digest.update(block)
                 if size!=manifest['size'] or digest.hexdigest()!=manifest['sha256']:raise RuntimeError('Checkpoint checksum mismatch')
-                model.load(file)
+                load_weights(model,file)
                 # Do not replay this reservation, even if upload fails after training.
-                model.train(rows,before_step=lambda:wait(256))
-                model.save(file);data=file.read_bytes();chunk_size=2_500_000
+                train_model(model,rows,args.device,before_step=lambda:wait(256))
+                save_file(snapshot(model),str(file));data=file.read_bytes();chunk_size=2_500_000
                 parts=(len(data)+chunk_size-1)//chunk_size
                 for index in range(parts):
                     request(session,'POST',base+'/api/update-part',data=data[index*chunk_size:(index+1)*chunk_size],headers={'Content-Type':'application/octet-stream','X-AXON-Job':job['id'],'X-AXON-Token':job['upload_token'],'X-AXON-Part':str(index)})
                 result=request(session,'POST',base+'/api/update',json={'job':job['id'],'token':job['upload_token'],'parts':parts,'size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
-                print(f"Round {n+1}: {len(rows)} distinct conversation examples submitted for validation.",flush=True)
+                print(f'Round {n+1}: {len(rows)} lessons trained using full backpropagation; checkpoint submitted.',flush=True)
     finally:
         session.close()
         if teacher is not None: teacher.close()
