@@ -9,6 +9,7 @@ export default async function handler(req,res){
     ok:true,model:'AXON AI',hosting:'vercel',chat_mode:'local-scratch',
     chat_requires_gateway:false,local_model_installed:true,
     training_available:Boolean(training.training_available),
+    training_status_reason:training.reason||null,
     training_progress:training.reserved_lessons??0,
     training_version:training.version??0,pending_updates:training.pending_updates??0,
     active_model_parameters:parameterCount(LEGACY_ARCHITECTURE),

@@ -15,12 +15,22 @@ def request(session,method,url,**kwargs):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--device',choices=['cpu','cuda'],default='cpu');p.add_argument('--server',default='https://axonai-theta.vercel.app');p.add_argument('--rounds',type=int,default=100)
-    p.add_argument('--cache',default=str(Path.home()/'.axonai'/'smoltalk-v1'));p.add_argument('--yes',action='store_true');args=p.parse_args()
+    p.add_argument('--cache',default=str(Path.home()/'.axonai'/'smoltalk-v1'));p.add_argument('--yes',action='store_true');p.add_argument('--no-teacher',action='store_true');args=p.parse_args()
     from urllib.parse import urlparse
     parsed=urlparse(args.server)
     if parsed.scheme!='https' or parsed.username or parsed.password:p.error('An HTTPS coordinator URL is required')
     if not 1<=args.rounds<=1000:p.error('Rounds must be 1..1000')
-    print('Training: local conversational corpus, pretrained two-pass checker, full-model weight updates.')
+    base=args.server.rstrip('/')
+    try:
+        response=requests.get(base+'/api/status',timeout=(8,15))
+        response.raise_for_status()
+        state=response.json()
+        if state.get('training_available') is not True:
+            raise RuntimeError('Training coordinator not ready: '+str(state.get('training_status_reason') or 'storage unavailable'))
+    except requests.RequestException as error:
+        raise RuntimeError('Training preflight failed. Verify the coordinator URL and internet connection.') from error
+    print('Training: unique conversational corpus and full-model weight updates.')
+    print('Pretrained review is optional; it is never mixed into student weights.', flush=True)
     print('Downloads are cached locally. Press Ctrl+C to stop.', flush=True)
     wait(512);info=prepare(args.cache)
     wait(512)
@@ -31,15 +41,13 @@ def main():
         raise RuntimeError('NVIDIA CUDA is unavailable. Launch CPU-AXON.exe instead.')
     torch.set_num_threads(min(4,max(1,os.cpu_count() or 1)))
     print('Training full AXON transformer on '+args.device.upper()+'.', flush=True)
-    # Half-precision, low-memory teacher needs substantially less headroom
-    # than the previous 2.3 GB unconditional reservation.
-    wait(1100)
-    from trainer.teacher import Teacher
-    print('Loading pretrained checker on this computer.', flush=True)
-    teacher=Teacher('cpu')
+    # Do not load a large pretrained model before the server allocates work.
+    # If it cannot load on a low-memory computer, the base trainer still works.
+    teacher=None
+    teacher_attempted=False
     worker_file=Path(args.cache)/'worker-id'
     if not worker_file.exists():worker_file.write_text(str(uuid.uuid4()))
-    worker=worker_file.read_text().strip();session=requests.Session();base=args.server.rstrip('/')
+    worker=worker_file.read_text().strip();session=requests.Session()
     try:
         model=Student().to(args.device)
         for n in range(args.rounds):
@@ -56,6 +64,17 @@ def main():
                 print(details.get(reason,'Training queue temporarily unavailable.'),flush=True)
                 break
             job=r.json();assignment=job.get('corpus')
+            if not args.no_teacher and not teacher_attempted:
+                teacher_attempted=True
+                try:
+                    wait(800)
+                    from trainer.teacher import Teacher
+                    print('Loading cached pretrained checker for teacher-assisted lessons.',flush=True)
+                    teacher=Teacher('cpu')
+                except Exception as error:
+                    print('Pretrained checker unavailable ('+type(error).__name__+
+                          '). Training with original dataset lessons instead.',flush=True)
+                    teacher=None
             if not assignment or assignment['id']!=info['id'] or assignment['revision']!=info['revision']:raise RuntimeError('Server does not support this corpus client yet.')
             arch=job['manifest']['architecture']
             if arch!=model.config:raise RuntimeError('Student architecture mismatch')
@@ -65,7 +84,7 @@ def main():
                 wait(256)
                 from trainer.corpus import training_context
                 context, answer = training_context(raw)
-                if not teacher.review_source(raw):
+                if teacher is not None and not teacher.review_source(raw):
                     print('  Original record failed two review checks; skipped.',flush=True)
                     continue
                 budget = 509 - sum(len(m['content'].encode()) + 2 for m in context)

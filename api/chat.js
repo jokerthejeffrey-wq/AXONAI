@@ -28,7 +28,7 @@ export default async function handler(req,res){
   if(identity)return res.status(200).json({reply:identity,mode:'local-basic',model:'AXON AI'});
   try{
     const quality=await getQuality();
-    if(body.stream===true && Number(quality?.version)>0){
+    if(body.stream===true && quality?.tested===true && quality?.ready===true && Number(quality.version)>0){
       if(generating){res.setHeader('Retry-After','5');return res.status(429).json({error:'Model busy.',retryable:true});}
       generating=true;
       try{
@@ -45,7 +45,7 @@ export default async function handler(req,res){
       }finally{generating=false;}
     }
     const result=await inferFromStudent(messages,quality);
-    return res.status(200).json({reply:result.reply,mode:result.mode,model:'AXON AI',version:result.version});
+    return res.status(200).json({reply:result.reply,mode:result.mode,model:result.model||'AXON AI',version:result.version});
   }catch(error){
     console.error('AXON local chat:',String(error?.name||'Error').slice(0,40));
     if(res.headersSent){res.end(JSON.stringify({type:'error',error:'Generation interrupted. Please retry.'})+'\n');return;}

@@ -22,9 +22,21 @@ export function readableReply(answer){
     new Set(letters.map(c=>c.toLowerCase())).size>=5&&answer.trim().split(/\s+/u).length>=3;
 }
 export const STILL_TRAINING='AXON AI is still learning. I cannot answer that reliably yet.';
+export function learningReply(messages){
+  const last=String(messages.at(-1)?.content||'').trim().toLowerCase();
+  if(/^(hi|hello|hey|hiya|good morning|good afternoon|good evening)[!.? ]*$/.test(last))
+    return "Hello! I'm AXON AI. My student model is still training, so I won't send you untested, random text.";
+  if(/^(thanks|thank you|thx)[!.? ]*$/.test(last))
+    return "You're welcome. AXON AI's student model is still learning.";
+  return STILL_TRAINING;
+}
 export async function scratchAnswer(messages,quality,{load=loadStudent,generate=scratchGenerate}={}){
   const version=Number(quality?.version||0);
-  if(!Number.isSafeInteger(version)||version<0)return {reply:STILL_TRAINING,mode:'learning',version:0};
+  if(!Number.isSafeInteger(version)||version<0)return {reply:learningReply(messages),mode:'learning',version:0};
+  // A newly saved checkpoint is NOT a chat-quality pass. Never stream or show
+  // its raw token samples until a held-out evaluation explicitly marks it ready.
+  if(quality?.tested!==true || quality?.ready!==true)
+    return {reply:learningReply(messages),mode:'learning',version};
   try{
     const model=await load(version);
     const answer=generate(model,messages,{maxNewTokens:128});

@@ -91,7 +91,7 @@ document.getElementById('composer').onsubmit = async e => {
       statusEl.textContent = 'Model capacity unavailable. Retrying in ' + seconds + ' seconds…';
       await new Promise(resolve => setTimeout(resolve, seconds * 1000));
     }
-    showChatMode();
+    showChatMode(data.mode);
     messages = [...outgoing, { role: 'assistant', content: data.reply }];
     if(!assistantBubble)bubble('assistant', data.reply);
     statusEl.textContent = '';
@@ -110,6 +110,11 @@ document.getElementById('composer').onsubmit = async e => {
     prompt.focus();
   }
 };
-function showChatMode() { document.getElementById('chat-mode').textContent = ''; }
+function showChatMode(mode) {
+  document.getElementById('chat-mode').textContent =
+    mode === 'assisted' ? '· pretrained assistance' :
+    mode === 'learning' ? '· student still training' :
+    mode === 'student' ? '· evaluated student' : '';
+}
 axonFetch('/api/status').then(r => { if (!r.ok) throw Error(); return r.json(); })
   .then(showChatMode).catch(() => { document.getElementById('chat-mode').textContent = ''; });

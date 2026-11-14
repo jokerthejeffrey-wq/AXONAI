@@ -112,7 +112,8 @@ def prepare_environment(gpu, repair, teacher=False):
                 str(ROOT/'trainer'/'requirements-teacher.txt')],meter,65,logfile)
             optional_stamp.write_text(teacher_fingerprint + '\n')
         run_setup_step('Package verification',[str(python),'-m','pip','check'],meter,8,logfile)
-        check='import numpy, pyarrow, psutil, requests, safetensors, torch, transformers'
+        check='import numpy, pyarrow, psutil, requests, safetensors, torch'
+        if teacher:check+=', transformers'
         if gpu:check+='; assert torch.cuda.is_available(), "CUDA GPU unavailable"'
 
         run_setup_step('Runtime verification',[str(python),'-c',check],meter,8,logfile)
@@ -121,20 +122,57 @@ def prepare_environment(gpu, repair, teacher=False):
     return python
 
 
+def preflight(server):
+    """Check the training API before installing multi-gigabyte dependencies."""
+    import json
+    from urllib.parse import urlparse
+    from urllib.request import Request, urlopen
+    from urllib.error import URLError
+    parsed = urlparse(server)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+        raise RuntimeError('Use an HTTPS training server URL without credentials.')
+    try:
+        with urlopen(Request(server.rstrip('/') + '/api/status',
+                             headers={'User-Agent': 'AXONAI-Trainer/2.0'}), timeout=15) as response:
+            info = json.load(response)
+    except (URLError, OSError, ValueError, TimeoutError) as error:
+        raise RuntimeError('Cannot reach the training API. Check your internet connection '
+                           'and the --server URL, then reopen the trainer. '
+                           '(' + type(error).__name__ + ')') from error
+    if info.get('ok') is not True or info.get('training_available') is not True:
+        reason = str(info.get('training_status_reason') or 'storage or coordinator unavailable')[:100]
+        raise RuntimeError('Training API is not ready (' + reason + '). '
+                           'The website owner must fix its storage/connection first.')
+    print('Training API preflight passed.', flush=True)
+
+
 def main():
     args = sys.argv[1:]
     if '--help' in args:
-        print('AXONAI console trainer: --gpu, --rounds N, --server HTTPS_URL, --yes, --install-only, --repair, --teacher-check')
+        print('AXONAI console trainer: --gpu, --rounds N, --server HTTPS_URL, --yes, --install-only, --repair, --no-teacher')
         return 0
     gpu = '--gpu' in args
     try:
-        python = prepare_environment(gpu, '--repair' in args, teacher=True)
+        if '--install-only' not in args and '--repair' not in args:
+            server = args[args.index('--server')+1] if '--server' in args and args.index('--server')+1 < len(args) else 'https://axonai-theta.vercel.app'
+            preflight(server)
+        wants_teacher = '--no-teacher' not in args
+        try:
+            python = prepare_environment(gpu, '--repair' in args, teacher=wants_teacher)
+        except RuntimeError as error:
+            if not wants_teacher or 'Local pretrained reviewer failed' not in str(error):
+                raise
+            print('Optional pretrained checker setup failed. Starting student training without it.', flush=True)
+            wants_teacher = False
+            python = prepare_environment(gpu, False, teacher=False)
         if '--install-only' in args:
             return 0
         entry = ROOT / 'trainer' / 'run.py'
         if not entry.exists():
             entry = entry.with_suffix('.pyc')
         options = [arg for arg in args if arg not in ('--gpu', '--repair', '--teacher-check')]
+        if not wants_teacher and '--no-teacher' not in options:
+            options.append('--no-teacher')
         return subprocess.run([str(python), '-u', str(entry), '--device', 'cuda' if gpu else 'cpu', *options]).returncode
     except KeyboardInterrupt:
         print('\nSetup stopped. Open the trainer again to resume with the cached downloads.', flush=True)

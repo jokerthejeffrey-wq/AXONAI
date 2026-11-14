@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 50
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12.10'
@@ -46,24 +48,18 @@ jobs:
           $runtime = "$env:LOCALAPPDATA/AXONAI/environments/python312-cpu/Scripts/python.exe"
           & $runtime -B scripts/windows/smoke_train.py $payload.FullName
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Publish only tested executables
+      - name: Publish verified trainers as release assets (no Git push)
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git fetch origin main
-          $head = git rev-parse origin/main
-          if ($head -ne '${{ github.sha }}') { throw 'Main changed during the build. Re-run against current main.' }
-          Copy-Item exe-build/CPU-AXON.exe public/downloads/CPU-AXON.exe -Force
-          Copy-Item exe-build/GPU-AXON.exe public/downloads/GPU-AXON.exe -Force
-          Copy-Item exe-build/CPU-AXON.exe CPU-AXON.exe -Force
-          Copy-Item exe-build/GPU-AXON.exe GPU-AXON.exe -Force
-          Copy-Item scripts/windows/downloads.html public/downloads.html -Force
-          $lines = @('CPU-AXON.exe','GPU-AXON.exe') | ForEach-Object { $h=(Get-FileHash "public/downloads/$_" -Algorithm SHA256).Hash.ToLower(); "$h  $_" }
-          [IO.File]::WriteAllLines((Join-Path $pwd 'public/downloads/SHA256SUMS.txt'),$lines)
-          git rm --ignore-unmatch public/downloads/AXON-Conversational-Trainer.zip
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add public/downloads.html public/downloads/CPU-AXON.exe public/downloads/GPU-AXON.exe public/downloads/SHA256SUMS.txt CPU-AXON.exe GPU-AXON.exe
-          git commit -m 'Publish verified AXONAI CPU and GPU executables'
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          git push origin HEAD:main
+          $tag = "trainers-$env:GITHUB_SHA"
+          $files = @('CPU-AXON.exe','GPU-AXON.exe')
+          $checksums = @()
+          foreach ($file in $files) {
+            $hash = (Get-FileHash "exe-build/$file" -Algorithm SHA256).Hash.ToLower()
+            $checksums += "$hash  $file"
+          }
+          [IO.File]::WriteAllLines((Join-Path $pwd 'exe-build/SHA256SUMS.txt'), $checksums)
+          gh release create $tag exe-build/CPU-AXON.exe exe-build/GPU-AXON.exe exe-build/SHA256SUMS.txt --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title "AXON AI trainers $($env:GITHUB_SHA.Substring(0,7))" --notes "Verified Windows trainers built from this source commit. No changes pushed back to main." --latest
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
