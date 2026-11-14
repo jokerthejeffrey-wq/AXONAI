@@ -149,7 +149,7 @@ def preflight(server):
 def main():
     args = sys.argv[1:]
     if '--help' in args:
-        print('AXONAI console trainer: --gpu, --rounds N, --server HTTPS_URL, --yes, --install-only, --repair, --teacher, --no-teacher')
+        print('AXONAI console trainer: --gpu, --rounds N (0=unlimited), --server HTTPS_URL, --yes, --install-only, --repair, --teacher, --no-teacher')
         return 0
     gpu = '--gpu' in args
     try:

@@ -28,6 +28,7 @@
     <a class="back" href="/">← AXON AI</a>
     <h1>Training workers</h1>
     <p>Download the latest Windows trainers from the verified GitHub release. New builds appear there after Windows validation; the website does not redeploy for every EXE build.</p>
+    <p><strong>Train as long as you want:</strong> no daily CPU or GPU job cap. The latest trainers run continuously by default. Press Ctrl+C to stop, or use <code>--rounds 20</code> for a limited session. When the review queue is busy, the trainer waits and retries. Training stops when unique source records are exhausted.</p>
     <p>Fast-start trainers download only your assigned lesson pages, verify their checksums, and keep them for reuse. No full 1 GB dataset build on your PC. Setup shows progress and estimated time remaining.</p>
     <p>Python and the full-gradient training runtime are installed once; subsequent runs reuse cached packages. The CPU runtime is substantially smaller than CUDA, but the initial PyTorch download is still required. GPU setup is larger. The built-in local helper validates source examples and creates limited, source-grounded instruction variations. It uses no pretrained weights or downloaded AI model. Training uses the existing shared AXON transformer; the larger research models are not yet the live chatbot.</p>
     <div class="items">

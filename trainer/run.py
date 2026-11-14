@@ -5,6 +5,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import requests
 from trainer.chunked_corpus import load_manifest, read_assigned
 from trainer.memory import wait, MemoryAdmissionError
+from trainer.assignments import rounds, claim_until_ready
 
 def request(session,method,url,**kwargs):
     for attempt in range(10):
@@ -14,13 +15,13 @@ def request(session,method,url,**kwargs):
     raise RuntimeError('Server remains busy. Restart later; completed reservations will not be reassigned.')
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--device',choices=['cpu','cuda'],default='cpu');p.add_argument('--server',default='https://axonai-theta.vercel.app');p.add_argument('--rounds',type=int,default=100)
+    p=argparse.ArgumentParser();p.add_argument('--device',choices=['cpu','cuda'],default='cpu');p.add_argument('--server',default='https://axonai-theta.vercel.app');p.add_argument('--rounds',type=int,default=0,help='0 = unlimited session, the default')
     p.add_argument('--teacher', action='store_true', help='Use built-in source-grounded local lesson helper (default)')
     p.add_argument('--cache',default=str(Path.home()/'.axonai'/'smoltalk-v1'));p.add_argument('--yes',action='store_true');p.add_argument('--no-teacher',action='store_true');args=p.parse_args()
     from urllib.parse import urlparse
     parsed=urlparse(args.server)
     if parsed.scheme!='https' or parsed.username or parsed.password:p.error('An HTTPS coordinator URL is required')
-    if not 1<=args.rounds<=1000:p.error('Rounds must be 1..1000')
+    if args.rounds<0:p.error('Rounds must be 0 (unlimited) or positive')
     base=args.server.rstrip('/')
     try:
         response=requests.get(base+'/api/status',timeout=(8,15))
@@ -32,7 +33,8 @@ def main():
         raise RuntimeError('Training preflight failed. Verify the coordinator URL and internet connection.') from error
     print('Training: unique conversational corpus and full-model weight updates.')
     print('Local teacher is non-pretrained and requires zero model downloads.', flush=True)
-    print('Downloads are cached locally. Press Ctrl+C to stop.', flush=True)
+    print('No daily cap: runs continuously until Ctrl+C or unique data runs out.', flush=True)
+    print('A busy review queue pauses the trainer instead of ending the session.', flush=True)
     pages=load_manifest();info=pages['corpus']
     Path(args.cache).mkdir(parents=True,exist_ok=True)
     print('Fast setup: only assigned lesson pages are downloaded; no 1 GB corpus build.', flush=True)
@@ -53,19 +55,11 @@ def main():
     worker=worker_file.read_text().strip();session=requests.Session()
     try:
         model=Student().to(args.device)
-        for n in range(args.rounds):
+        for n in rounds(args.rounds):
             wait(512)
-            r=request(session,'POST',base+'/api/job',json={'worker':worker,'corpus':info})
-            if r.status_code==204:
-                reason=r.headers.get('X-AXON-Queue','review-pending')
-                details={
-                    'worker-daily-limit':'Daily training share complete.',
-                    'daily-capacity-reached':'Training capacity filled for today.',
-                    'corpus-complete':'All available unique examples assigned.',
-                    'review-pending':'Submitted models are awaiting review.',
-                }
-                print(details.get(reason,'Training queue temporarily unavailable.'),flush=True)
-                break
+            r=claim_until_ready(lambda:request(session,'POST',base+'/api/job',
+                                                  json={'worker':worker,'corpus':info}))
+            if r is None:break
             job=r.json();assignment=job.get('corpus')
             if not args.no_teacher and not teacher_attempted:
                 teacher_attempted=True

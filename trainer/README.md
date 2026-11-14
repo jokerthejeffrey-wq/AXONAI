@@ -16,6 +16,10 @@ By default the trainer uses the original conversational lessons immediately. All
 
 The active student remains the 3.4M-parameter causal transformer; changing the live checkpoint shape in place would break existing volunteers. It trains all layers through backpropagation with a UTF-8 byte tokenizer. Python generation now caches attention keys/values and can yield text incrementally through `student.generate_stream`; this does not alter the separately deployed JavaScript chat engine. An 11,240,448-parameter compact research configuration and the prior 50M experiment are available for offline evaluation. Neither has been silently switched into the production checkpoint protocol.
 
-Small transformers are real neural language models but are not guaranteed GPT-3/GPT-4 capability. More contributors help only when updates pass evaluation and the data, compute, capacity, and coordinator throughput are sufficient. Current server quotas remain in place to control storage/validation cost.
+Small transformers are real neural language models but are not guaranteed GPT-3/GPT-4 capability. More contributors help only when updates pass evaluation and the data, compute, capacity, and coordinator throughput are sufficient. There is no daily per-person or global job quota. The review queue still allows at most twelve pending checkpoint updates; workers wait for capacity instead of exiting. The source corpus is finite and globally allocated examples are not reused.
 
 The RAM admission check pauses before estimated usage exceeds 90%; it cannot guarantee against every transient spike. Ctrl+C stops the trainer. Reopening reuses installed dependencies and downloaded lesson pages. No personal documents are accessed.
+
+## Continuous training
+
+The default CPU and GPU trainer session runs indefinitely with --rounds 0. Use --rounds 20 to limit a session to twenty jobs. During server review congestion, the console displays a waiting status and checks again later. Ctrl+C stops training. The session ends normally when all unique dataset records have been assigned; hardware, electricity, bandwidth, available data and service costs still constrain training.

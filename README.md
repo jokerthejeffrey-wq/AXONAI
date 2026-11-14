@@ -29,10 +29,14 @@ The EXEs are configured for https://axonai-theta.vercel.app. Training updates us
 
 Ollama is a local model runtime, not a training quality level. AXON's student remains a small model (approximately 3.4 million parameters), far smaller than most capable open models. More training and more participating PCs can help, but do not guarantee monotonic improvement or ChatGPT/Ollama-model-class competence within days. Independent language-quality tests, data quality, sufficient compute, and larger model architectures would be needed for a competitive assistant.
 
-Training jobs have queue and daily limits to protect cloud quotas. More volunteers cannot exceed those safety caps automatically. A local teacher may hallucinate; double-checking using the same model is not equivalent to two independent fact sources. Only train with datasets and models whose licenses and terms permit their use.
+Daily training limits have been removed. The CPU and GPU trainers run continuously by default until Ctrl+C or until all unique records have been assigned. The pending-review queue remains bounded and the trainer pauses and retries while it is full; storage, hosting quotas, and data availability still apply. Unlimited runtime does not guarantee improvement. A local teacher may hallucinate; double-checking using the same model is not equivalent to two independent fact sources. Only train with datasets and models whose licenses and terms permit their use.
 
 ## Scratch-only chat and fast local teacher (November 2026)
 
 The public chat no longer calls Qwen, Vercel AI Gateway or browser-hosted pretrained models. The model is an autoregressive Transformer with a UTF-8 byte tokenizer and real token-by-token sampling. A byte is one token; word/subword tokenization requires a new tokenizer and checkpoint migration, not merely a UI switch. A checkpoint with version 0 is random initialization and cannot answer. Trained-but-unevaluated checkpoints are accessible only using the clearly labelled experimental preview; this output may be nonsensical.
 
 The Windows training helper uses standard-library source validation and conservative input rephrasing by default; there is no pretrained teacher download. Full-gradient PyTorch is still required for student training, including an initial CPU or CUDA package installation. The 11M/50M research tracks remain separate from the currently deployed ~3.4M protocol. Parameter growth and volunteer-hours alone cannot guarantee GPT-3/4-level quality.
+
+## Continuous volunteer training
+
+There is no daily job cap per volunteer or globally. The current EXEs default to --rounds 0 (unlimited); use --rounds 50 for a bounded session. Workers wait and retry during review congestion. When all currently supported unique examples are assigned, training stops normally instead of repeating records. Ctrl+C stops a session. A small pending-review queue remains to protect storage and validation capacity.
