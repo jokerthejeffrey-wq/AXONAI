@@ -49,7 +49,11 @@ export async function publicStatus(){
     const [v]=await sql`SELECT val FROM axon_meta WHERE key='version'`;
     const [l]=await sql`SELECT coalesce(sum(val),0) AS val FROM axon_meta WHERE key IN ('sequence','corpus_sequence')`;
     const [p]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
-    return {ok:true,training_available:true,version:Number(v?.val||0),reserved_lessons:Number(l?.val||0),pending_updates:Number(p?.n||0),queue_capacity:PENDING_QUEUE_LIMIT,queue_full:Number(p?.n||0)>=PENDING_QUEUE_LIMIT};
+    const [contributors]=await sql`SELECT count(DISTINCT worker)::integer AS n
+      FROM axon_jobs WHERE status IN ('approved','pending')
+      AND issued_at > now() - interval '7 days'`;
+    return {ok:true,training_available:true,version:Number(v?.val||0),reserved_lessons:Number(l?.val||0),pending_updates:Number(p?.n||0),queue_capacity:PENDING_QUEUE_LIMIT,queue_full:Number(p?.n||0)>=PENDING_QUEUE_LIMIT,
+      contributing_workers_7d:Number(contributors?.n||0)};
   }catch(e){
     // Log only a bounded, redacted diagnostic; do not log the connection
     // string, credentials, request bodies, or SQL parameters.
