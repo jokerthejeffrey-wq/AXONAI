@@ -1,8 +1,12 @@
 name: Validate rebuilt AXON Windows trainers
 on:
   push:
-    branches: [installer-eta-dual-teacher-20261114, fix-ram-admission-compact-teacher, fix-teacher-loader-progress-20261114]
+    branches: [installer-eta-dual-teacher-20261114, fix-ram-admission-compact-teacher, fix-teacher-loader-progress-20261114, axon-50m-research-track]
   workflow_dispatch:
+concurrency:
+  group: research-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 jobs:
@@ -32,7 +36,7 @@ jobs:
           $z=[IO.Compression.ZipFile]::OpenRead((Join-Path $pwd 'exe-build/payload.zip'))
           try {
             $names=$z.Entries.FullName
-            foreach ($item in @('student.pyc','trainer/start.pyc','trainer/progress.pyc','trainer/teacher.pyc','trainer/requirements-teacher.txt')) {
+            foreach ($item in @('student.pyc','trainer/start.pyc','trainer/progress.pyc','trainer/teacher.pyc','trainer/requirements-teacher.txt','trainer/expanded_model.pyc','trainer/eval_50m.pyc')) {
               if ($names -notcontains $item) { throw "Missing packed file: $item" }
             }
           } finally { $z.Dispose() }
@@ -44,4 +48,16 @@ jobs:
           $payload = Get-ChildItem "$env:LOCALAPPDATA/AXONAI" -Directory -Filter 'app-*' | Select-Object -First 1
           $runtime = "$env:LOCALAPPDATA/AXONAI/environments/python312-cpu/Scripts/python.exe"
           & $runtime -B scripts/windows/smoke_train.py $payload.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify 50M research transformer and gradients
+        shell: pwsh
+        run: |
+          $runtime = "$env:LOCALAPPDATA/AXONAI/environments/python312-cpu/Scripts/python.exe"
+          & $runtime -B -m unittest trainer.test_expanded_model -v
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify large checkpoint export and legacy migration
+        shell: pwsh
+        run: |
+          $runtime = "$env:LOCALAPPDATA/AXONAI/environments/python312-cpu/Scripts/python.exe"
+          & $runtime -B scripts/windows/smoke_50m_checkpoint.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

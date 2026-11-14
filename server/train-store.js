@@ -7,6 +7,8 @@ import path from 'node:path';
 import {initialCheckpoint} from './base-checkpoint.js';
 import {parseCheckpoint,scoreNextByte} from './scratch-infer.js';
 export const PENDING_QUEUE_LIMIT=12;
+export const DAILY_GLOBAL_JOBS=96;
+export const FAIR_WORKER_JOBS_PER_DAY=19;
 class InvalidCandidate extends Error {}
 
 let initialized;
@@ -49,7 +51,11 @@ export async function publicStatus(){
     const [v]=await sql`SELECT val FROM axon_meta WHERE key='version'`;
     const [l]=await sql`SELECT coalesce(sum(val),0) AS val FROM axon_meta WHERE key IN ('sequence','corpus_sequence')`;
     const [p]=await sql`SELECT count(*)::integer AS n FROM axon_jobs WHERE status='pending'`;
-    return {ok:true,training_available:true,version:Number(v?.val||0),reserved_lessons:Number(l?.val||0),pending_updates:Number(p?.n||0),queue_capacity:PENDING_QUEUE_LIMIT,queue_full:Number(p?.n||0)>=PENDING_QUEUE_LIMIT};
+    const [contributors]=await sql`SELECT count(DISTINCT worker)::integer AS n
+      FROM axon_jobs WHERE status IN ('approved','pending')
+      AND issued_at > now() - interval '7 days'`;
+    return {ok:true,training_available:true,version:Number(v?.val||0),reserved_lessons:Number(l?.val||0),pending_updates:Number(p?.n||0),queue_capacity:PENDING_QUEUE_LIMIT,queue_full:Number(p?.n||0)>=PENDING_QUEUE_LIMIT,
+      contributing_workers_7d:Number(contributors?.n||0)};
   }catch(e){
     // Log only a bounded, redacted diagnostic; do not log the connection
     // string, credentials, request bodies, or SQL parameters.
@@ -81,14 +87,21 @@ export async function claim(worker,corpus=null){
     // Older trainers will stop cleanly on 204 instead of looping on a 429.
     if(Number(pending.n)>=PENDING_QUEUE_LIMIT)return null;
   }
+  // Reserve roughly one fifth of the day's training opportunities per worker
+  // so five different volunteer PCs can all contribute on the same day.
+  const [assigned]=await sql`SELECT count(*)::integer AS n FROM axon_jobs
+    WHERE worker=${worker} AND issued_at>=CURRENT_DATE`;
+  if(Number(assigned?.n||0)>=FAIR_WORKER_JOBS_PER_DAY)
+    return {deferred:true,reason:'worker-daily-limit'};
   await sql`INSERT INTO axon_daily(day,claims) VALUES(CURRENT_DATE,0) ON CONFLICT DO NOTHING`;
-  const [quota]=await sql`UPDATE axon_daily SET claims=claims+1 WHERE day=CURRENT_DATE AND claims<96 RETURNING claims`;
-  if(!quota)return null; // All daily lessons reserved: allow old trainers to exit without an endless 429 loop.
+  const [quota]=await sql`UPDATE axon_daily SET claims=claims+1 WHERE day=CURRENT_DATE
+    AND claims<${DAILY_GLOBAL_JOBS} RETURNING claims`;
+  if(!quota)return {deferred:true,reason:'daily-capacity-reached'};
   const [v]=await sql`SELECT val FROM axon_meta WHERE key='version'`;
   const key=corpus?'corpus_sequence':'sequence';
   const [seq]=await sql`UPDATE axon_meta SET val=val+${BATCH} WHERE key=${key}
     AND val+${BATCH}<=${corpus?corpus.records:Number.MAX_SAFE_INTEGER} RETURNING val-${BATCH} AS start`;
-  if(!seq)return null;
+  if(!seq)return {deferred:true,reason:'corpus-complete'};
   const id=crypto.randomBytes(16).toString('hex'),secret=crypto.randomBytes(32).toString('hex');
   const assignment=corpus?{id:corpus.id,revision:corpus.revision,start:Number(seq.start),count:BATCH}:null;
   const rows=assignment?[]:makeLessons(Number(seq.start));
