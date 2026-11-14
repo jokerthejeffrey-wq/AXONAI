@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import importlib.util
-import itertools
 from pathlib import Path
 import sys
 
@@ -52,6 +51,13 @@ def main():
         trained_steps = int(core.get_meta(db, "transformer_steps", 0))
         if trained_steps:
             print(f"Loaded AXON checkpoint ({trained_steps:,} training batches).")
+            validation = core.get_meta(db, "transformer_validation_loss", "n/a")
+            print(f"Held-out validation loss: {validation}")
+            if trained_steps < 10000:
+                print(
+                    "WARNING: This is still an experimental, undertrained model. "
+                    "Generating tokens is not proof of fluent speech."
+                )
         else:
             print('No trained checkpoint yet. Run: python "LLM Train.py"')
 
@@ -94,13 +100,13 @@ def main():
                 core.store_lesson(db, question, answer, "user")
                 vocab = core.extend_vocabulary(db, question + " " + answer)
                 db.commit()
-                print("Updating AXON's neural weights from your example...")
+                print(
+                    "Saved the example. Training AXON on a mix of old and new "
+                    "conversations to reduce overfitting..."
+                )
                 try:
-                    core.train_student(
-                        db, np, itertools.repeat((question, answer), 200),
-                        max_steps=50, print_every=10
-                    )
-                    print("AXON checkpoint updated.")
+                    core.learn_observations(db, np, steps=40)
+                    print("AXON neural checkpoint updated.")
                 except KeyboardInterrupt:
                     print("\nTraining interrupted; the latest checkpoint was saved.")
                 continue
