@@ -5,7 +5,7 @@ conservative instruction variation. It cannot fact-check unknown claims.
 import re
 from trainer.corpus import training_context
 
-_BAD = re.compile(r'[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]')
+_BAD = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
 _PREFIXES = (
     'Please answer this question: ',
     'Can you explain the following? ',

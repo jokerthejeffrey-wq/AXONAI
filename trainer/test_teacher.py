@@ -26,7 +26,7 @@ class LocalTeacherTests(unittest.TestCase):
             {'role':'assistant','content':'Question?'}]}))
         self.assertFalse(teacher.review_source({'messages': [
             {'role':'user','content':'Question?'},
-            {'role':'assistant','content':'Answer\\x00'}]}))
+            {'role':'assistant','content':'Answer\x00'}]}))
         self.assertFalse(teacher.review_source({'messages': []}))
 
     def test_variation_preserves_original_answer(self):
