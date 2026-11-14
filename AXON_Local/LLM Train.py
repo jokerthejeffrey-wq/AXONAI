@@ -1,13 +1,12 @@
 """AXON human/assistant parallel conversation training.
 
-Several simulated humans talk with a locally hosted Qwen assistant in parallel.
-Human and Assistant are two independent local model processes (same GGUF weights).
-AXON notes human messages and assistant answers, and trains only on correct
-human -> assistant pairs. Its normal chat generates its own tokens using NumPy.
+A locally hosted Qwen model generates teacher dialogues. AXON's student is a
+NumPy-only causal Transformer with multi-head self-attention, positional
+embeddings, two decoder blocks, tied token embeddings, full-softmax
+cross-entropy, Adam, held-out validation loss, and autoregressive generation.
 
-This is an experimental 25M-parameter next-token model, NOT a transformer.
-It may need substantially more and better training to write coherent replies.
-Four project files; downloadable runtime cache is outside the project folder.
+Qwen is used only for teacher/observation mode. Normal AXON chat uses only
+its own Transformer weights saved in BRAIN.db.
 """
 from __future__ import annotations
 
@@ -375,15 +374,40 @@ def example_lines(lines_limit=None):
                 continue
 
 
-# === AXON student: original trainable neural word predictor (not a transformer) ===
-# The network uses learned word embeddings and a position-weighted context, then
-# scores candidate next words. The two teacher personas are NEVER used by AXON chat.
-CONTEXT = 16
-LOGIT_SCALE = 18.0
-# Reserve five model input slots for the most recent human question.
-# Keep a short sliding answer window in the remaining eleven slots.
-POSITION = tuple([3.0] * 5 + [1.10 ** i for i in range(CONTEXT - 5)])
-STUDENT_ARCH = 'AXON-human-assistant-curated-v5'
+# === AXON causal Transformer student ===
+# NumPy-only decoder-only Transformer. The pretrained Qwen teacher is separate.
+# Token embeddings are tied to the output projection to keep the CPU model small.
+LEGACY_DIM = 768
+TRANSFORMER_DIM = 128
+TRANSFORMER_HEADS = 4
+TRANSFORMER_LAYERS = 2
+TRANSFORMER_FF = 384
+TRANSFORMER_CONTEXT = 64
+TRANSFORMER_BATCH = 2
+TRANSFORMER_VERSION = 'axon-causal-transformer-v1'
+TRANSFORMER_CONFIG = {
+    'type': 'decoder-only causal Transformer',
+    'vocab_capacity': VOCAB_SIZE,
+    'dimension': TRANSFORMER_DIM,
+    'heads': TRANSFORMER_HEADS,
+    'layers': TRANSFORMER_LAYERS,
+    'feed_forward': TRANSFORMER_FF,
+    'context': TRANSFORMER_CONTEXT,
+    'tied_embeddings': True,
+    'loss': 'masked full-vocabulary cross entropy',
+}
+# Approximate trainable parameter count, including tied token embeddings once.
+PARAMETERS = (
+    VOCAB_SIZE * TRANSFORMER_DIM
+    + TRANSFORMER_CONTEXT * TRANSFORMER_DIM
+    + TRANSFORMER_LAYERS * (
+        4 * TRANSFORMER_DIM * TRANSFORMER_DIM
+        + 2 * TRANSFORMER_DIM * TRANSFORMER_FF
+        + TRANSFORMER_FF + 5 * TRANSFORMER_DIM
+    )
+    + 2 * TRANSFORMER_DIM
+)
+STUDENT_ARCH = 'AXON-causal-transformer-v1'
 SPECIAL = ('<pad>', '<unk>', '<eos>', '<user>', '<assistant>')
 
 # Natural-language first: not 30 million repetitive arithmetic samples.
@@ -690,90 +714,443 @@ def _sparse_add(np, table, row_ids, row_grads):
     table[sorted_ids[start]] += grouped_grads
 
 
-def train_student(db, np, rows, max_steps=2000, print_every=100):
-    vocab = build_vocabulary(db)
-    lookup = {w:i for i,w in enumerate(vocab)}
-    active = len(vocab)
-    if active < 8:
-        raise RuntimeError('Vocabulary is too small for training')
-    w_in,w_out = load_student(db,np,vocab)
-    rng = np.random.default_rng(2026 + int(get_meta(db, 'student_steps','0')))
-    weights = np.asarray(POSITION, dtype=np.float32)
-    weights /= weights.sum()
-    total_steps = int(get_meta(db,'student_steps','0'))
-    batch_count = 0
-    batch_contexts = []
-    batch_targets = []
-    started = time.monotonic()
-    last_loss = 0.0
 
-    def update(contexts,targets):
-        nonlocal total_steps,batch_count,last_loss
-        ids = np.asarray(contexts,dtype=np.int32)
-        targets = np.asarray(targets,dtype=np.int32)
-        n = len(ids)
-        neg = rng.integers(2,active,size=(n,31),dtype=np.int32)
-        # No artificial role/padding tokens in sampled negatives.
-        mask = (neg==3) | (neg==4)
-        neg[mask] = rng.integers(5,active,size=int(mask.sum()),dtype=np.int32)
-        neg[:,0] = np.where(targets==2,5,2)  # explicitly train EOS boundary
-        candidates = np.concatenate((targets[:,None],neg),axis=1)
-        context = np.einsum('bld,l->bd',w_in[ids],weights,optimize=True)
-        sampled = w_out[candidates]
-        scores = LOGIT_SCALE*np.einsum('bd,bkd->bk',context,sampled,optimize=True)
-        scores -= scores.max(axis=1,keepdims=True)
-        probs = np.exp(scores)
-        probs /= probs.sum(axis=1,keepdims=True)
-        last_loss = float(-np.log(np.maximum(probs[:,0],1e-9)).mean())
-        probs[:,0] -= 1
-        probs /= n
-        d_context = LOGIT_SCALE*np.einsum('bk,bkd->bd',probs,sampled,optimize=True)
-        d_out = LOGIT_SCALE*(probs[:,:,None]*context[:,None,:])
-        lr = .065 / (1.0 + total_steps/12000.0)
-        _sparse_add(np,w_out,candidates.reshape(-1),-lr*np.clip(d_out.reshape(-1,DIM),-1,1))
-        for index,posweight in enumerate(weights):
-            _sparse_add(np,w_in,ids[:,index],-lr*np.clip(d_context*posweight,-1,1))
-        batch_count += 1
+def _trf_layer_norm(np, x, gamma, beta):
+    mean = x.mean(axis=-1, keepdims=True)
+    centered = x - mean
+    inv_std = 1.0 / np.sqrt((centered * centered).mean(axis=-1, keepdims=True) + 1e-5)
+    normalized = centered * inv_std
+    return normalized * gamma + beta, (normalized, inv_std)
+
+
+def _trf_layer_norm_backward(np, grad, cache, gamma):
+    normalized, inv_std = cache
+    axes = tuple(range(grad.ndim - 1))
+    d_gamma = (grad * normalized).sum(axis=axes)
+    d_beta = grad.sum(axis=axes)
+    d_norm = grad * gamma
+    width = grad.shape[-1]
+    d_x = (inv_std / width) * (
+        width * d_norm
+        - d_norm.sum(axis=-1, keepdims=True)
+        - normalized * (d_norm * normalized).sum(axis=-1, keepdims=True)
+    )
+    return d_x, d_gamma, d_beta
+
+
+def _trf_parameter_names():
+    names = ['tok_emb', 'pos_emb', 'final_ln_g', 'final_ln_b']
+    for layer in range(TRANSFORMER_LAYERS):
+        p = f'layer{layer}_'
+        names.extend(p + name for name in (
+            'ln1_g', 'ln1_b', 'wq', 'wk', 'wv', 'wo',
+            'ln2_g', 'ln2_b', 'w1', 'b1', 'w2', 'b2'
+        ))
+    return names
+
+
+def _trf_initialize(np):
+    rng = np.random.default_rng(20261114)
+    d, f = TRANSFORMER_DIM, TRANSFORMER_FF
+    params = {
+        'tok_emb': rng.normal(0.0, 0.02, (VOCAB_SIZE, d)).astype('float32'),
+        'pos_emb': rng.normal(0.0, 0.01, (TRANSFORMER_CONTEXT, d)).astype('float32'),
+        'final_ln_g': np.ones((d,), dtype='float32'),
+        'final_ln_b': np.zeros((d,), dtype='float32'),
+    }
+    for layer in range(TRANSFORMER_LAYERS):
+        p = f'layer{layer}_'
+        params[p + 'ln1_g'] = np.ones((d,), dtype='float32')
+        params[p + 'ln1_b'] = np.zeros((d,), dtype='float32')
+        params[p + 'ln2_g'] = np.ones((d,), dtype='float32')
+        params[p + 'ln2_b'] = np.zeros((d,), dtype='float32')
+        for name in ('wq', 'wk', 'wv', 'wo'):
+            params[p + name] = rng.normal(0.0, 1.0 / math.sqrt(d), (d, d)).astype('float32')
+        params[p + 'w1'] = rng.normal(0.0, math.sqrt(2.0 / d), (d, f)).astype('float32')
+        params[p + 'b1'] = np.zeros((f,), dtype='float32')
+        params[p + 'w2'] = rng.normal(0.0, math.sqrt(2.0 / f), (f, d)).astype('float32')
+        params[p + 'b2'] = np.zeros((d,), dtype='float32')
+    return params
+
+
+def save_transformer(db, np, params, moment1, moment2, step):
+    """Persist Transformer parameters AND Adam state in BRAIN.db."""
+    enforce_db_size(db, 80 * 1024 * 1024)
+    for prefix, collection in (
+        ('trf_p_', params), ('trf_m_', moment1), ('trf_v_', moment2)
+    ):
+        for name, array in collection.items():
+            payload = zlib.compress(np.asarray(array, dtype='<f4').tobytes(), 1)
+            db.execute(
+                'INSERT OR REPLACE INTO weights(key,value) VALUES(?,?)',
+                (prefix + name, sqlite3.Binary(payload))
+            )
+    set_meta(db, 'transformer_version', TRANSFORMER_VERSION)
+    set_meta(db, 'transformer_config', json.dumps(TRANSFORMER_CONFIG, sort_keys=True))
+    set_meta(db, 'transformer_steps', int(step))
+    set_meta(db, 'student_steps', int(step))
+    db.commit()
+
+
+def load_transformer(db, np, vocab=None):
+    """Load the causal Transformer; initialize it once if no compatible checkpoint exists."""
+    vocab = vocab or build_vocabulary(db)
+    names = _trf_parameter_names()
+    version_ok = get_meta(db, 'transformer_version') == TRANSFORMER_VERSION
+    params, moment1, moment2 = {}, {}, {}
+    if version_ok:
+        try:
+            for prefix, target in (
+                ('trf_p_', params), ('trf_m_', moment1), ('trf_v_', moment2)
+            ):
+                for name in names:
+                    row = db.execute(
+                        'SELECT value FROM weights WHERE key=?', (prefix + name,)
+                    ).fetchone()
+                    if not row:
+                        raise KeyError(prefix + name)
+                    array = np.frombuffer(
+                        zlib.decompress(row[0]), dtype='<f4'
+                    ).copy()
+                    target[name] = array.reshape(_trf_initialize_shapes[name])
+        except (KeyError, ValueError, zlib.error):
+            version_ok = False
+    if not version_ok:
+        db.execute("DELETE FROM weights WHERE key LIKE 'trf\\_%' ESCAPE '\\'")
+        params = _trf_initialize(np)
+        moment1 = {name: np.zeros_like(value) for name, value in params.items()}
+        moment2 = {name: np.zeros_like(value) for name, value in params.items()}
+        step = 0
+        save_transformer(db, np, params, moment1, moment2, step)
+        say(
+            f'Initialized causal Transformer: {PARAMETERS:,} parameters, '
+            f'{TRANSFORMER_LAYERS} layers, {TRANSFORMER_HEADS} attention heads, '
+            f'{TRANSFORMER_CONTEXT}-token context.'
+        )
+    else:
+        step = int(get_meta(db, 'transformer_steps', 0))
+    return params, moment1, moment2, step
+
+
+def _trf_shapes():
+    d, f = TRANSFORMER_DIM, TRANSFORMER_FF
+    shapes = {
+        'tok_emb': (VOCAB_SIZE, d),
+        'pos_emb': (TRANSFORMER_CONTEXT, d),
+        'final_ln_g': (d,), 'final_ln_b': (d,),
+    }
+    for layer in range(TRANSFORMER_LAYERS):
+        p = f'layer{layer}_'
+        shapes.update({
+            p + 'ln1_g': (d,), p + 'ln1_b': (d,),
+            p + 'ln2_g': (d,), p + 'ln2_b': (d,),
+            p + 'wq': (d, d), p + 'wk': (d, d),
+            p + 'wv': (d, d), p + 'wo': (d, d),
+            p + 'w1': (d, f), p + 'b1': (f,),
+            p + 'w2': (f, d), p + 'b2': (d,),
+        })
+    return shapes
+
+
+_transformer_initialize_shapes = _trf_shapes()
+
+
+def transformer_forward(np, params, token_ids):
+    """Causal self-attention forward pass. token_ids has shape [batch, time]."""
+    ids = np.asarray(token_ids, dtype=np.int32)
+    if ids.ndim == 1:
+        ids = ids[None, :]
+    batch, time = ids.shape
+    if time > TRANSFORMER_CONTEXT:
+        ids = ids[:, -TRANSFORMER_CONTEXT:]
+        time = ids.shape[1]
+    d, heads = TRANSFORMER_DIM, TRANSFORMER_HEADS
+    head_dim = d // heads
+    x = params['tok_emb'][ids] + params['pos_emb'][None, :time, :]
+    block_caches = []
+    causal = np.triu(np.ones((time, time), dtype=bool), k=1)[None, None, :, :]
+
+    for layer in range(TRANSFORMER_LAYERS):
+        p = f'layer{layer}_'
+        n1, ln1_cache = _trf_layer_norm(
+            np, x, params[p + 'ln1_g'], params[p + 'ln1_b']
+        )
+        q = (n1 @ params[p + 'wq']).reshape(batch, time, heads, head_dim).transpose(0, 2, 1, 3)
+        k = (n1 @ params[p + 'wk']).reshape(batch, time, heads, head_dim).transpose(0, 2, 1, 3)
+        v = (n1 @ params[p + 'wv']).reshape(batch, time, heads, head_dim).transpose(0, 2, 1, 3)
+        scores = (q @ np.swapaxes(k, -1, -2)) / math.sqrt(head_dim)
+        scores = np.where(causal, -1e9, scores)
+        scores = scores - scores.max(axis=-1, keepdims=True)
+        attention = np.exp(scores)
+        attention /= np.maximum(attention.sum(axis=-1, keepdims=True), 1e-12)
+        context = attention @ v
+        merged = context.transpose(0, 2, 1, 3).reshape(batch, time, d)
+        attended = merged @ params[p + 'wo']
+        x1 = x + attended
+
+        n2, ln2_cache = _trf_layer_norm(
+            np, x1, params[p + 'ln2_g'], params[p + 'ln2_b']
+        )
+        pre = n2 @ params[p + 'w1'] + params[p + 'b1']
+        activation = np.maximum(pre, 0.0)
+        ff_out = activation @ params[p + 'w2'] + params[p + 'b2']
+        x2 = x1 + ff_out
+        block_caches.append({
+            'ln1': ln1_cache, 'n1': n1, 'q': q, 'k': k, 'v': v,
+            'attention': attention, 'merged': merged, 'ln2': ln2_cache,
+            'n2': n2, 'pre': pre, 'activation': activation,
+        })
+        x = x2
+
+    final, final_cache = _trf_layer_norm(
+        np, x, params['final_ln_g'], params['final_ln_b']
+    )
+    # Tied input/output token embeddings.
+    logits = final @ params['tok_emb'][:len(vocab_for_forward(params))].T
+    cache = {
+        'ids': ids, 'blocks': block_caches, 'final': final,
+        'final_ln': final_cache, 'active_vocab': logits.shape[-1],
+    }
+    return logits, cache
+
+
+def vocab_for_forward(params):
+    # All unused capacity rows are masked at generation/training call sites.
+    # The active vocabulary length is attached transiently by the trainer.
+    return range(int(params.get('_active_vocab', VOCAB_SIZE)))
+
+
+def _trf_backward(np, params, cache, dlogits):
+    """Backpropagate full-vocabulary cross entropy through attention and FFN blocks."""
+    ids = cache['ids']
+    batch, time = ids.shape
+    d, heads = TRANSFORMER_DIM, TRANSFORMER_HEADS
+    head_dim = d // heads
+    active = cache['active_vocab']
+    final = cache['final']
+    grads = {name: np.zeros_like(value) for name, value in params.items() if not name.startswith('_')}
+    d_embedding = np.zeros_like(params['tok_emb'])
+
+    grads['tok_emb'][:active] = (
+        dlogits.reshape(-1, active).T @ final.reshape(-1, d)
+    )
+    d_final = dlogits @ params['tok_emb'][:active]
+    dx, grads['final_ln_g'], grads['final_ln_b'] = _trf_layer_norm_backward(
+        np, d_final, cache['final_ln'], params['final_ln_g']
+    )
+
+    for layer in reversed(range(TRANSFORMER_LAYERS)):
+        p = f'layer{layer}_'
+        c = cache['blocks'][layer]
+        # x2 = x1 + FF(LN(x1))
+        d_x1 = dx.copy()
+        d_ff = dx
+        grads[p + 'w2'] = c['activation'].reshape(-1, TRANSFORMER_FF).T @ d_ff.reshape(-1, d)
+        grads[p + 'b2'] = d_ff.sum(axis=(0, 1))
+        d_activation = d_ff @ params[p + 'w2'].T
+        d_pre = d_activation * (c['pre'] > 0.0)
+        grads[p + 'w1'] = c['n2'].reshape(-1, d).T @ d_pre.reshape(-1, TRANSFORMER_FF)
+        grads[p + 'b1'] = d_pre.sum(axis=(0, 1))
+        d_n2 = d_pre @ params[p + 'w1'].T
+        d_ln2, grads[p + 'ln2_g'], grads[p + 'ln2_b'] = _trf_layer_norm_backward(
+            np, d_n2, c['ln2'], params[p + 'ln2_g']
+        )
+        d_x1 += d_ln2
+
+        # x1 = x + attention(LN(x))
+        d_x = d_x1.copy()
+        d_merged = d_x1 @ params[p + 'wo'].T
+        grads[p + 'wo'] = c['merged'].reshape(-1, d).T @ d_x1.reshape(-1, d)
+        d_context = d_merged.reshape(batch, time, heads, head_dim).transpose(0, 2, 1, 3)
+        attention = c['attention']
+        v = c['v']
+        d_attention = d_context @ np.swapaxes(v, -1, -2)
+        d_v = np.swapaxes(attention, -1, -2) @ d_context
+        d_scores = attention * (
+            d_attention - (d_attention * attention).sum(axis=-1, keepdims=True)
+        )
+        causal = np.triu(np.ones((time, time), dtype=bool), k=1)[None, None, :, :]
+        d_scores = np.where(causal, 0.0, d_scores)
+        q, k = c['q'], c['k']
+        d_q = (d_scores @ k) / math.sqrt(head_dim)
+        d_k = (np.swapaxes(d_scores, -1, -2) @ q) / math.sqrt(head_dim)
+
+        dq_flat = d_q.transpose(0, 2, 1, 3).reshape(batch, time, d)
+        dk_flat = d_k.transpose(0, 2, 1, 3).reshape(batch, time, d)
+        dv_flat = d_v.transpose(0, 2, 1, 3).reshape(batch, time, d)
+        n1 = c['n1']
+        grads[p + 'wq'] = n1.reshape(-1, d).T @ dq_flat.reshape(-1, d)
+        grads[p + 'wk'] = n1.reshape(-1, d).T @ dk_flat.reshape(-1, d)
+        grads[p + 'wv'] = n1.reshape(-1, d).T @ dv_flat.reshape(-1, d)
+        d_n1 = (
+            dq_flat @ params[p + 'wq'].T
+            + dk_flat @ params[p + 'wk'].T
+            + dv_flat @ params[p + 'wv'].T
+        )
+        d_ln1, grads[p + 'ln1_g'], grads[p + 'ln1_b'] = _trf_layer_norm_backward(
+            np, d_n1, c['ln1'], params[p + 'ln1_g']
+        )
+        dx = d_x + d_ln1
+
+    np.add.at(d_embedding, ids.reshape(-1), dx.reshape(-1, d))
+    grads['tok_emb'] += d_embedding
+    grads['pos_emb'] = np.zeros_like(params['pos_emb'])
+    grads['pos_emb'][:time] = dx.sum(axis=0)
+    return grads
+
+
+def _trf_make_batch(np, examples, lookup):
+    encoded = []
+    for question, answer in examples:
+        q = tokenizer(question)[-24:]
+        a = tokenizer(answer)
+        max_answer = max(1, TRANSFORMER_CONTEXT - len(q) - 2)
+        a = a[:max_answer]
+        if not q and not a:
+            continue
+        q_ids = [lookup.get(token, 1) for token in q]
+        a_ids = [lookup.get(token, 1) for token in a]
+        sequence = [3] + q_ids + [4] + a_ids + [2]
+        x, y = sequence[:-1], sequence[1:]
+        mask = [0.0] * len(y)
+        answer_start = len(q_ids) + 1
+        for index in range(answer_start, len(y)):
+            mask[index] = 1.0
+        if any(mask):
+            encoded.append((x, y, mask))
+    if not encoded:
+        return None
+    time_steps = max(len(item[0]) for item in encoded)
+    batch = len(encoded)
+    x_ids = np.zeros((batch, time_steps), dtype=np.int32)
+    targets = np.zeros((batch, time_steps), dtype=np.int32)
+    loss_mask = np.zeros((batch, time_steps), dtype=np.float32)
+    for row, (x, y, mask) in enumerate(encoded):
+        x_ids[row, :len(x)] = x
+        targets[row, :len(y)] = y
+        loss_mask[row, :len(mask)] = mask
+    return x_ids, targets, loss_mask
+
+
+def _trf_loss(np, params, x_ids, targets, loss_mask, backward=False):
+    # Only the currently known vocabulary participates in the softmax.
+    active = int(params['_active_vocab'])
+    logits, cache = transformer_forward(np, params, x_ids)
+    logits = logits.astype('float32', copy=False)
+    shifted = logits - logits.max(axis=-1, keepdims=True)
+    exp_scores = np.exp(np.clip(shifted, -60.0, 0.0))
+    probabilities = exp_scores / np.maximum(exp_scores.sum(axis=-1, keepdims=True), 1e-12)
+    b_idx, t_idx = np.indices(targets.shape)
+    chosen = probabilities[b_idx, t_idx, targets]
+    denominator = max(float(loss_mask.sum()), 1.0)
+    loss = float(-(np.log(np.maximum(chosen, 1e-12)) * loss_mask).sum() / denominator)
+    if not backward:
+        return loss, None
+    probabilities[b_idx, t_idx, targets] -= 1.0
+    probabilities *= (loss_mask / denominator)[..., None]
+    gradients = _trf_backward(np, params, cache, probabilities)
+    return loss, gradients
+
+
+def transformer_validation_loss(db, np, params, vocab, limit=40):
+    """Held-out loss on every tenth saved lesson; no gradient updates."""
+    rows = db.execute(
+        "SELECT prompt,answer FROM lessons "
+        "WHERE id % 10 = 0 AND origin IN ('seed','user','teacher','dialogue_quality_v5') "
+        "ORDER BY id DESC LIMIT ?", (max(1, int(limit)),)
+    ).fetchall()
+    if not rows:
+        return None
+    lookup = {word: index for index, word in enumerate(vocab)}
+    losses = []
+    for start in range(0, len(rows), TRANSFORMER_BATCH):
+        batch = _trf_make_batch(np, rows[start:start + TRANSFORMER_BATCH], lookup)
+        if batch is None:
+            continue
+        loss, _ = _trf_loss(np, params, *batch, backward=False)
+        losses.append(loss)
+    return float(sum(losses) / len(losses)) if losses else None
+
+
+def train_student(db, np, rows, max_steps=2000, print_every=100):
+    """Train the causal Transformer with Adam and masked full-softmax cross entropy."""
+    vocab = build_vocabulary(db)
+    lookup = {word: index for index, word in enumerate(vocab)}
+    params, moment1, moment2, total_steps = load_transformer(db, np, vocab)
+    params['_active_vocab'] = len(vocab)
+    batch_examples = []
+    batch_count = 0
+    last_loss = 0.0
+    started = time.monotonic()
+    print_every = max(1, int(print_every))
+
+    def update(examples):
+        nonlocal batch_count, total_steps, last_loss
+        batch = _trf_make_batch(np, examples, lookup)
+        if batch is None:
+            return
+        last_loss, gradients = _trf_loss(np, params, *batch, backward=True)
+        norm_sq = sum(float((grad * grad).sum()) for grad in gradients.values())
+        grad_scale = min(1.0, 1.0 / max(math.sqrt(norm_sq), 1e-8))
         total_steps += 1
-        if batch_count%print_every==0:
-            progress('Student gradients',batch_count,max_steps if max_steps else 0,started)
-            print(f'  loss {last_loss:.2f}',end='',flush=True)
-        if batch_count%1000==0:
-            save_student(db,np,w_in,w_out,total_steps)
+        lr = 0.00045 * min(1.0, total_steps / 12.0) / math.sqrt(1.0 + total_steps / 5000.0)
+        beta1, beta2 = 0.9, 0.999
+        correction1 = 1.0 - beta1 ** total_steps
+        correction2 = 1.0 - beta2 ** total_steps
+        for name, grad in gradients.items():
+            grad = grad * grad_scale
+            moment1[name] *= beta1
+            moment1[name] += (1.0 - beta1) * grad
+            moment2[name] *= beta2
+            moment2[name] += (1.0 - beta2) * (grad * grad)
+            m_hat = moment1[name] / correction1
+            v_hat = moment2[name] / correction2
+            params[name] -= lr * m_hat / (np.sqrt(v_hat) + 1e-8)
+            if name.endswith(('wq', 'wk', 'wv', 'wo', 'w1', 'w2')):
+                params[name] *= (1.0 - lr * 0.01)
+        batch_count += 1
 
     try:
-        for q,a in rows:
-            prefix,answer = _sequence(q,a,lookup)
-            if len(prefix) > 128:
-                prefix = [3]+prefix[-127:]
-            if len(answer) > 160:
-                answer = answer[:159] + [2]
-            # Train on every answer position: the model must learn to complete
-            # whole responses, not just randomly selected words in the question.
-            for target in answer:
-                batch_contexts.append(_context(prefix))
-                batch_targets.append(target)
-                prefix.append(target)
-                if len(batch_contexts) >= 48:
-                    update(batch_contexts,batch_targets)
-                    batch_contexts.clear()
-                    batch_targets.clear()
-                    if max_steps is not None and batch_count >= max_steps:
-                        break
-            if max_steps is not None and batch_count>=max_steps:
+        for question, answer in rows:
+            if not question.strip() or not answer.strip():
+                continue
+            batch_examples.append((question, answer))
+            if len(batch_examples) < TRANSFORMER_BATCH:
+                continue
+            update(batch_examples)
+            batch_examples.clear()
+            if batch_count and batch_count % print_every == 0:
+                save_transformer(db, np, params, moment1, moment2, total_steps)
+                val = transformer_validation_loss(db, np, params, vocab, limit=32)
+                set_meta(db, 'transformer_validation_loss', 'n/a' if val is None else f'{val:.5f}')
+                db.commit()
+                elapsed = max(time.monotonic() - started, 0.001)
+                val_text = 'n/a' if val is None else f'{val:.3f}'
+                say(
+                    f'Transformer batch {batch_count:,}'
+                    + (f'/{max_steps:,}' if max_steps is not None else '')
+                    + f' | train loss {last_loss:.3f} | validation loss {val_text}'
+                    + f' | {elapsed:.1f}s'
+                )
+            if max_steps is not None and batch_count >= int(max_steps):
                 break
-        if batch_contexts and (max_steps is None or batch_count<max_steps):
-            update(batch_contexts,batch_targets)
     except KeyboardInterrupt:
-        say('\nInterrupted: saving trained student weights...')
-        save_student(db,np,w_in,w_out,total_steps)
+        say('\nInterrupted: saving Transformer weights and Adam state...')
+        save_transformer(db, np, params, moment1, moment2, total_steps)
         raise
-    finally:
-        say()
-    save_student(db,np,w_in,w_out,total_steps)
-    say(f'Trained {batch_count:,} batches. Last sampled loss {last_loss:.3f}; total {total_steps:,} batches.')
-    return batch_count
 
+    if batch_examples and (max_steps is None or batch_count < int(max_steps)):
+        update(batch_examples)
+    save_transformer(db, np, params, moment1, moment2, total_steps)
+    val = transformer_validation_loss(db, np, params, vocab, limit=64)
+    set_meta(db, 'transformer_validation_loss', 'n/a' if val is None else f'{val:.5f}')
+    db.commit()
+    say(
+        f'Transformer trained {batch_count:,} batches; total {total_steps:,}. '
+        f'Final train loss {last_loss:.3f}; validation loss '
+        + ('n/a (need held-out lessons)' if val is None else f'{val:.3f}')
+    )
+    return batch_count
 
 def _format_piece(token,previous):
     if not previous:
@@ -785,83 +1162,110 @@ def _format_piece(token,previous):
     return ' '+token
 
 
-def student_generate(db,prompt,length=65,temperature=.72,top_k=22,on_piece=None,state=None,history=None):
-    """AXON generates genuinely new words, using only its own trained weights.
 
-    Token-level constraints block punctuation loops; no answers are retrieved
-    from lessons and the pretrained agents are NOT consulted during a chat reply.
-    """
-    np=ensure_numpy()
-    vocab=build_vocabulary(db)
-    if not db.execute("SELECT 1 FROM weights WHERE key='emb_in'").fetchone():
-        return '[Run LLM Train.py to train AXON first.]'
-    w_in,w_out=state if state is not None else load_student(db,np,vocab)
-    lookup={word:i for i,word in enumerate(vocab)}
-    prefix=[3]+[lookup.get(word,1) for word in tokenizer(prompt)]+[4]
+def transformer_generate(db, prompt, length=80, temperature=0.8, top_k=32,
+                         top_p=0.92, on_piece=None, history=None):
+    """Autoregressive next-token generation using only AXON's own Transformer."""
+    np = ensure_numpy()
+    vocab = build_vocabulary(db)
+    if int(get_meta(db, 'transformer_steps', 0)) <= 0:
+        return '[AXON has no trained Transformer yet. Run LLM Train.py first.]'
+    params, _, _, _ = load_transformer(db, np, vocab)
+    params['_active_vocab'] = len(vocab)
+    lookup = {word: index for index, word in enumerate(vocab)}
+
+    # Include one recent exchange only when it fits; the current question remains last.
+    context_tokens = []
     if history:
-        for user,assistant in history[-2:]:
-            prefix=[3]+[lookup.get(t,1) for t in tokenizer(user)]+[4]+[lookup.get(t,1) for t in tokenizer(assistant)]+[2]+prefix
-    pos=np.asarray(POSITION,dtype=np.float32)
-    pos/=pos.sum()
-    rng=np.random.default_rng()
-    ids_generated=[]
-    pieces=[]
-    last_token=''
-    punctuation={'.',',','!','?',':',';','\"','\'','(',')','-'}
-    for step in range(max(1,int(length))):
-        context=np.einsum('ld,l->d',w_in[np.asarray(_context(prefix),dtype=np.int32)],pos,optimize=True)
-        scores=LOGIT_SCALE*(w_out[:len(vocab)]@context)
-        scores[:2]=-1e9
-        scores[3:5]=-1e9
-        if step<5: scores[2]=-1e9
-        # Avoid initial punctuation and repeated punctuation while keeping learned
-        # word ordering stochastic (not fixed/canned text).
-        if step==0:
-            for t in punctuation:
-                if t in lookup: scores[lookup[t]]=-1e9
-        if last_token in punctuation:
-            for t in punctuation:
-                if t in lookup: scores[lookup[t]]=-1e9
-        if step>2 and last_token in {'.','!','?'}:
-            scores[2]+=2.3
-        for idx in set(ids_generated[-20:]):
-            if idx>=5: scores[idx]-=1.65
-        # If the network cannot form a sentence, produce a short partial reply
-        # instead of dozens of repetitive commas.
-        top=max(2,min(int(top_k),len(vocab)))
-        candidates=np.argpartition(scores,-top)[-top:].tolist()
-        learned=word_pattern_probabilities(db,[vocab[idx] for idx in ids_generated],lookup)
-        for idx,count in learned:
-            if scores[idx]>-1e8 and idx not in candidates:
-                candidates.append(idx)
-        candidates=np.asarray(candidates,dtype=np.int32)
-        logits=scores[candidates]/max(.20,float(temperature))
-        neural_probs=np.exp(logits-logits.max());neural_probs/=neural_probs.sum()
-        if learned:
-            pattern=np.zeros(len(candidates),dtype=np.float64)
-            position_by_id={int(tok_id):i for i,tok_id in enumerate(candidates)}
-            for idx,count in learned:
-                if idx in position_by_id and scores[idx]>-1e8:
-                    pattern[position_by_id[idx]]=float(count)**.8
-            if pattern.sum()>0:
-                pattern/=pattern.sum()
-                mix=min(.72,.30+.11*math.log1p(sum(count for _,count in learned)))
-                neural_probs=(1-mix)*neural_probs+mix*pattern
-                neural_probs/=neural_probs.sum()
-        choice=int(rng.choice(candidates,p=neural_probs))
-        if choice==2: break
-        token=vocab[choice]
-        piece=_format_piece(token,last_token)
-        last_token=token
+        for old_q, old_a in history[-1:]:
+            context_tokens.extend([3] + [lookup.get(t, 1) for t in tokenizer(old_q)]
+                                  + [4] + [lookup.get(t, 1) for t in tokenizer(old_a)] + [2])
+    context_tokens.extend([3] + [lookup.get(t, 1) for t in tokenizer(prompt)] + [4])
+    context_tokens = context_tokens[-TRANSFORMER_CONTEXT:]
+    if context_tokens and context_tokens[0] != 3:
+        context_tokens = [3] + context_tokens[-(TRANSFORMER_CONTEXT - 1):]
+
+    generated = []
+    pieces = []
+    previous = ''
+    rng = np.random.default_rng()
+    max_new = max(1, min(200, int(length)))
+    temperature = max(0.15, min(2.0, float(temperature)))
+    top_k = max(2, min(int(top_k), len(vocab)))
+
+    for step in range(max_new):
+        x = np.asarray([context_tokens[-TRANSFORMER_CONTEXT:]], dtype=np.int32)
+        logits, _ = transformer_forward(np, params, x)
+        scores = logits[0, -1, :len(vocab)].astype('float64', copy=True)
+        scores[0] = -1e9
+        scores[1] = -1e9
+        scores[3] = -1e9
+        scores[4] = -1e9
+        if step < 3:
+            scores[2] = -1e9
+
+        # Penalize recent repeats without hardcoding any response text.
+        for token_id in set(generated[-18:]):
+            if token_id >= 5:
+                scores[token_id] -= 0.85
+        if generated:
+            last = vocab[generated[-1]]
+            if last in ('.', ',', '!', '?', ':', ';'):
+                for punct in ('.', ',', '!', '?', ':', ';'):
+                    idx = lookup.get(punct)
+                    if idx is not None:
+                        scores[idx] = -1e9
+        if step == 0:
+            for punct in ('.', ',', '!', '?', ':', ';'):
+                idx = lookup.get(punct)
+                if idx is not None:
+                    scores[idx] = -1e9
+
+        candidates = np.argpartition(scores, -top_k)[-top_k:]
+        candidate_scores = scores[candidates] / temperature
+        candidate_scores -= candidate_scores.max()
+        probabilities = np.exp(np.clip(candidate_scores, -60.0, 0.0))
+        probabilities /= max(float(probabilities.sum()), 1e-12)
+        order = np.argsort(-probabilities)
+        candidates = candidates[order]
+        probabilities = probabilities[order]
+        cumulative = np.cumsum(probabilities)
+        keep = cumulative - probabilities < max(0.05, min(1.0, float(top_p)))
+        keep[0] = True
+        candidates = candidates[keep]
+        probabilities = probabilities[keep]
+        probabilities /= probabilities.sum()
+        choice = int(rng.choice(candidates, p=probabilities))
+        if choice == 2:
+            break
+
+        token = vocab[choice]
+        piece = _format_piece(token, previous)
+        if previous in ('.', '!', '?') and token and token[0].isalpha():
+            piece = ' ' + token[0].upper() + token[1:]
         pieces.append(piece)
-        if on_piece is not None: on_piece(piece)
-        prefix.append(choice)
-        ids_generated.append(choice)
-        if len(ids_generated)>=12 and ids_generated[-6:]==ids_generated[-12:-6]:
+        if on_piece is not None:
+            on_piece(piece)
+        context_tokens.append(choice)
+        generated.append(choice)
+        previous = token
+
+        if len(generated) >= 12 and generated[-6:] == generated[-12:-6]:
             break
-        if step>=16 and token in {'.','!','?'} and rng.random()<.35:
+        if step >= 10 and token in ('.', '!', '?') and rng.random() < 0.18:
             break
+
     return ''.join(pieces)
+
+
+def student_generate(db, prompt, length=65, temperature=.8, top_k=32,
+                     on_piece=None, state=None, history=None):
+    """Compatibility wrapper used by MANUAL Chat.py; runs the causal Transformer."""
+    return transformer_generate(
+        db, prompt, length=length, temperature=temperature, top_k=top_k,
+        on_piece=on_piece, history=history
+    )
+
 
 
 # A human model produces each human turn, guided by a concrete, useful goal.
