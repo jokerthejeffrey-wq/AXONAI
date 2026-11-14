@@ -1,4 +1,5 @@
-import {DAILY_GLOBAL_JOBS,FAIR_WORKER_JOBS_PER_DAY} from '../server/train-store.js';
+import {PENDING_QUEUE_LIMIT} from '../server/train-store.js';
+import fs from 'node:fs';
 import status from '../api/status.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,8 +30,9 @@ test('Production remains on the old model while 50M research track is unactivate
  assert.equal(res.body.five_contributors_active,false);
 });
 
-test('Five volunteers receive individual opportunities without increasing the shared quota',()=>{
- assert.equal(DAILY_GLOBAL_JOBS,96);
- assert.equal(FAIR_WORKER_JOBS_PER_DAY,19);
- assert.ok(5*FAIR_WORKER_JOBS_PER_DAY<=DAILY_GLOBAL_JOBS);
+test('No daily job caps; checkpoint review queue remains bounded',()=>{
+ const source=fs.readFileSync('server/train-store.js','utf8');
+ assert.doesNotMatch(source,/FAIR_WORKER_JOBS_PER_DAY|DAILY_GLOBAL_JOBS|worker-daily-limit|daily-capacity-reached/);
+ assert.equal(PENDING_QUEUE_LIMIT,12);
+ assert.match(source,/corpus_sequence/);
 });

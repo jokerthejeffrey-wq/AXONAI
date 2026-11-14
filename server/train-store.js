@@ -7,8 +7,6 @@ import path from 'node:path';
 import {initialCheckpoint} from './base-checkpoint.js';
 import {parseCheckpoint,scoreNextByte} from './scratch-infer.js';
 export const PENDING_QUEUE_LIMIT=12;
-export const DAILY_GLOBAL_JOBS=96;
-export const FAIR_WORKER_JOBS_PER_DAY=19;
 class InvalidCandidate extends Error {}
 
 let initialized;
@@ -34,7 +32,6 @@ async function setup(sql){
   await sql`CREATE TABLE IF NOT EXISTS axon_checkpoints (
     version bigint primary key, parts jsonb not null, size bigint not null, sha256 text not null
   )`;
-  await sql`CREATE TABLE IF NOT EXISTS axon_daily (day date primary key, claims integer not null default 0)`;
   await sql`CREATE TABLE IF NOT EXISTS axon_queue_lease (id integer primary key, owner text not null, locked_until timestamptz not null)`;
   await sql`INSERT INTO axon_queue_lease (id,owner,locked_until) VALUES (1,'',to_timestamp(0)) ON CONFLICT DO NOTHING`;
   await sql`CREATE TABLE IF NOT EXISTS axon_quality (
@@ -87,16 +84,8 @@ export async function claim(worker,corpus=null){
     // Older trainers will stop cleanly on 204 instead of looping on a 429.
     if(Number(pending.n)>=PENDING_QUEUE_LIMIT)return null;
   }
-  // Reserve roughly one fifth of the day's training opportunities per worker
-  // so five different volunteer PCs can all contribute on the same day.
-  const [assigned]=await sql`SELECT count(*)::integer AS n FROM axon_jobs
-    WHERE worker=${worker} AND issued_at>=CURRENT_DATE`;
-  if(Number(assigned?.n||0)>=FAIR_WORKER_JOBS_PER_DAY)
-    return {deferred:true,reason:'worker-daily-limit'};
-  await sql`INSERT INTO axon_daily(day,claims) VALUES(CURRENT_DATE,0) ON CONFLICT DO NOTHING`;
-  const [quota]=await sql`UPDATE axon_daily SET claims=claims+1 WHERE day=CURRENT_DATE
-    AND claims<${DAILY_GLOBAL_JOBS} RETURNING claims`;
-  if(!quota)return {deferred:true,reason:'daily-capacity-reached'};
+  // No daily time or job cap: volunteers may keep training on distinct records.
+  // The pending-review queue remains bounded and reservations never repeat.
   const [v]=await sql`SELECT val FROM axon_meta WHERE key='version'`;
   const key=corpus?'corpus_sequence':'sequence';
   const [seq]=await sql`UPDATE axon_meta SET val=val+${BATCH} WHERE key=${key}

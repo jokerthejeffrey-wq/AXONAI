@@ -4,11 +4,12 @@ import fs from 'node:fs';
 import {PENDING_QUEUE_LIMIT} from '../server/train-store.js';
 import {parseCheckpoint,scoreNextByte} from '../server/scratch-infer.js';
 
-test('queue is bounded and the job endpoint reports a normal stop on saturation',()=>{
+test('queue is bounded and the job endpoint reports retry backpressure',()=>{
  assert.equal(PENDING_QUEUE_LIMIT,12);
  const endpoint=fs.readFileSync('api/job.js','utf8');
  assert.match(endpoint,/job===null/);
  assert.match(endpoint,/status\(204\)\.end\(\)/);
+ assert.match(endpoint,/Retry-After/);
  const store=fs.readFileSync('server/train-store.js','utf8');
  assert.match(store,/autoReviewOne\(sql\)/);
  assert.match(store,/status='pending'/);
