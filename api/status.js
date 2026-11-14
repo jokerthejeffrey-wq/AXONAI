@@ -7,9 +7,10 @@ export default async function handler(req,res){
   const [quality,training]=await Promise.all([getQuality(),publicStatus()]);
   return res.status(200).json({
     ok:true,model:'AXON AI',hosting:'vercel',
-    chat_mode:process.env.AXON_CHAT_MODE==='student'?'local-scratch':
-      (process.env.AI_GATEWAY_API_KEY?'pretrained-assistance-with-student-fallback':'local-scratch'),
+    chat_mode:'pretrained-generation-with-browser-fallback',
     chat_requires_gateway:false,local_model_installed:true,
+    chat_browser_model:'SmolLM2 360M (CPU) / Qwen2.5 0.5B (WebGPU)',
+    chat_student_ready:Boolean(quality?.ready&&quality?.tested),
     training_available:Boolean(training.training_available),
     training_status_reason:training.reason||null,
     training_progress:training.reserved_lessons??0,

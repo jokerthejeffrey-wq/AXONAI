@@ -15,9 +15,10 @@ test('Conversation validation rejects malformed roles and oversized input',()=>{
  assert.throws(()=>validateMessages([{role:'user',content:'Hi'},{role:'assistant',content:'Hi'}]));
  assert.equal(validateMessages([{role:'user',content:'Hello'}]).length,1);
 });
-test('Chat identity endpoint works without a model or external backend',async()=>{
+test('Chat never fabricates identity text when the pretrained backend is unavailable',async()=>{
  const res=response();await chat({method:'POST',headers:{},body:{messages:[{role:'user',content:'Who created you?'}]}},res);
- assert.equal(res.code,200);assert.equal(res.body.mode,'local-basic');assert.match(res.body.reply,/community/);
+ assert.equal(res.code,503);assert.equal(res.body.code,'browser_model_required');
+ assert.equal(res.body.reply,undefined);
 });
 test('Method and JSON errors are useful JSON responses',async()=>{
  let res=response();await chat({method:'GET',headers:{}},res);assert.equal(res.code,405);
