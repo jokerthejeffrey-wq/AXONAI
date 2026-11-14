@@ -799,6 +799,9 @@ def load_transformer(db, np, vocab=None):
     names = _trf_parameter_names()
     version_ok = get_meta(db, 'transformer_version') == TRANSFORMER_VERSION
     params, moment1, moment2 = {}, {}, {}
+    # Build expected shapes locally instead of relying on a module-level alias.
+    # This also makes checkpoint loading robust to stale/renamed shape globals.
+    expected_shapes = _trf_shapes()
     if version_ok:
         try:
             for prefix, target in (
@@ -813,7 +816,7 @@ def load_transformer(db, np, vocab=None):
                     array = np.frombuffer(
                         zlib.decompress(row[0]), dtype='<f4'
                     ).copy()
-                    target[name] = array.reshape(_trf_initialize_shapes[name])
+                    target[name] = array.reshape(expected_shapes[name])
         except (KeyError, ValueError, zlib.error):
             version_ok = False
     if not version_ok:
