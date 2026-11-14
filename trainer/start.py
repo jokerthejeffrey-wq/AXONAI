@@ -112,7 +112,7 @@ def prepare_environment(gpu, repair, teacher=False):
                 str(ROOT/'trainer'/'requirements-teacher.txt')],meter,65,logfile)
             optional_stamp.write_text(teacher_fingerprint + '\n')
         run_setup_step('Package verification',[str(python),'-m','pip','check'],meter,8,logfile)
-        check='import numpy, psutil, requests, safetensors, torch'
+        check='import numpy, psutil, requests, torch; from safetensors.torch import load_file, save_file'
         if teacher:check+=', transformers'
         if gpu:check+='; assert torch.cuda.is_available(), "CUDA GPU unavailable"'
 
