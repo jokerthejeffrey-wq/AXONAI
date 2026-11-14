@@ -51,3 +51,9 @@ jobs:
           $runtime = "$env:LOCALAPPDATA/AXONAI/environments/python312-cpu/Scripts/python.exe"
           & $runtime -B -m unittest trainer.test_expanded_model -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Verify large checkpoint export and legacy migration
+        shell: pwsh
+        run: |
+          $runtime = "$env:LOCALAPPDATA/AXONAI/environments/python312-cpu/Scripts/python.exe"
+          & $runtime -B scripts/windows/smoke_50m_checkpoint.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
