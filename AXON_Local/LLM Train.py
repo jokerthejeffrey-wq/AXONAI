@@ -487,14 +487,19 @@ def migrate_dialogue_schema(db):
     db.commit()
 
 
-def observe_word_patterns(db,text,commit=False):
-    """Learn next-token n-gram counts from observed natural language.
+def observe_word_patterns(db,text,commit=False,prefix=None):
+    """Learn next-token counts conditioned on the question that prompted the answer.
 
-    These are token statistics, never whole-response lookup or copy/paste.
+    With prefix, the token stream is question + assistant marker + answer.
+    This lets generation score likely first words from the current question,
+    rather than using one global distribution of answer openings.
     """
     tokens=tokenizer(text)[:500]
     if not tokens:return
-    prev=['<start>']
+    if prefix:
+        prev=['<user>']+tokenizer(prefix)[-120:]+['<assistant>']
+    else:
+        prev=['<start>']
     for token in tokens+['<eos>']:
         for n in (1,2):
             ctx=prev[-n:]
@@ -507,11 +512,17 @@ def observe_word_patterns(db,text,commit=False):
 
 
 def bootstrap_word_patterns(db):
-    if get_meta(db,'ngrams_ready')=='1':return
-    say('Preparing learned word-order statistics from saved conversations...')
-    for (answer,) in db.execute("SELECT answer FROM lessons WHERE origin IN ('seed','user','teacher','dialogue_quality_v5') ORDER BY id DESC LIMIT 6000"):
-        observe_word_patterns(db,answer)
-    set_meta(db,'ngrams_ready','1')
+    if get_meta(db,'ngrams_ready')=='2':return
+    say('Preparing question-conditioned word-order statistics from saved conversations...')
+    db.execute('DELETE FROM nextword')
+    rows=db.execute(
+        "SELECT prompt,answer FROM lessons "
+        "WHERE origin IN ('seed','user','teacher','dialogue_quality_v5') "
+        "ORDER BY id DESC LIMIT 12000"
+    ).fetchall()
+    for prompt,answer in rows:
+        observe_word_patterns(db,answer,prefix=prompt)
+    set_meta(db,'ngrams_ready','2')
     db.commit()
 
 
@@ -607,7 +618,7 @@ def note_exchange(db, session, turn, speaker, receiver, replied_to, message):
     # replies by Assistant to Human, never from fake-human prompts.
     if speaker=='Assistant' and receiver=='Human' and replied_to.strip():
         store_lesson(db,replied_to,message,'dialogue_quality_v5')
-        observe_word_patterns(db,message)
+        observe_word_patterns(db,message,prefix=replied_to)
     extend_vocabulary(db,replied_to+' '+message)
     db.commit()
 
