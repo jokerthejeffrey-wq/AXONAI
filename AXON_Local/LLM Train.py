@@ -1293,11 +1293,11 @@ def retrieve_learned_reply(db, prompt, history=None):
     if not pool:
         return None
 
-    # For manually taught examples, prefer them over automatically generated seed data.
-    priority = {'user': 4, 'dialogue_quality_v5': 3, 'teacher': 2, 'seed': 1}
-    best_priority = max(priority.get(item[2], 0) for item in pool)
-    best = [item for item in pool if priority.get(item[2], 0) == best_priority]
-    return random.choice(best)[1]
+    # Mix the user's explicit lessons with real teacher-chat examples.
+    # Explicitly taught replies receive extra weight without hiding all other variants.
+    source_weight = {'user': 4, 'dialogue_quality_v5': 2, 'teacher': 2, 'seed': 1}
+    weights = [source_weight.get(item[2], 1) for item in pool]
+    return random.choices(pool, weights=weights, k=1)[0][1]
 
 
 def transformer_generate(db, prompt, length=80, temperature=0.8, top_k=32,
