@@ -1,13 +1,16 @@
 """Checks that the expanded architecture is real, trainable, and isolated."""
 import unittest
 
-from settings import CONFIG, LARGE_CONFIG, parameter_count
+from settings import CONFIG, LARGE_CONFIG, COMPACT_CONFIG, parameter_count
 
 
 class ProfileTests(unittest.TestCase):
     def test_parameter_count(self):
         self.assertEqual(parameter_count(LARGE_CONFIG), 50_224_640)
         self.assertGreater(parameter_count(LARGE_CONFIG), parameter_count(CONFIG)*10)
+
+    def test_compact_parameter_count(self):
+        self.assertEqual(parameter_count(COMPACT_CONFIG), 11_240_448)
 
     def test_research_model_preserves_legacy_profile(self):
         self.assertEqual(CONFIG, dict(vocab_size=260,width=256,layers=4,heads=8,context=512))
@@ -22,6 +25,15 @@ class TorchExpandedTests(unittest.TestCase):
         except ImportError:
             raise unittest.SkipTest('PyTorch is not installed in the lightweight CI environment')
         cls.torch=torch
+
+    def test_compact_transformer_training(self):
+        from student import Student, train
+        from trainer.expanded_model import expand_legacy
+        model=expand_legacy(Student(),target=COMPACT_CONFIG)
+        self.assertEqual(sum(p.numel() for p in model.parameters()),11_240_448)
+        before=model.blocks[0].qkv.weight.detach().clone()
+        train(model,[dict(concept='test',messages=[dict(role='user',content='Hi')],response='Hello')],'cpu')
+        self.assertFalse(self.torch.equal(before,model.blocks[0].qkv.weight))
 
     def test_large_transformer_and_transfer(self):
         from student import Student

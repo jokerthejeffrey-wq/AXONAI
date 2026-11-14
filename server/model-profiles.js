@@ -6,6 +6,9 @@ export const LEGACY_ARCHITECTURE = Object.freeze({
 export const EXPANDED_ARCHITECTURE = Object.freeze({
   vocab_size:260,width:640,layers:10,heads:8,context:1024
 });
+export const COMPACT_ARCHITECTURE = Object.freeze({
+  vocab_size:260,width:384,layers:6,heads:8,context:1024
+});
 export function parameterCount(profile){
   for(const k of ['vocab_size','width','layers','heads','context']){
     if(!Number.isSafeInteger(profile?.[k])||profile[k]<=0)throw new TypeError('Invalid model profile');

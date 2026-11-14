@@ -1,7 +1,8 @@
 """Run with Python 3.12 on a Windows build runner."""
-import hashlib,py_compile,subprocess,os,zipfile,shutil,urllib.request
+import hashlib,py_compile,subprocess,os,zipfile,shutil,urllib.request,sys
 from pathlib import Path
 root=Path(__file__).resolve().parents[2];out=root/'exe-build';out.mkdir(exist_ok=True)
+sys.path.insert(0,str(root))
 stage=out/'payload';stage.mkdir(exist_ok=True)
 files=[root/'settings.py',root/'student.py']+[p for p in (root/'trainer').glob('*.py') if not p.name.startswith('test_')]
 for src in files:
@@ -9,6 +10,9 @@ for src in files:
  py_compile.compile(str(src),cfile=str(dst),dfile=str(src.relative_to(root)),doraise=True,invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH)
 shutil.copy2(root/'trainer/requirements.txt',stage/'trainer/requirements.txt')
 shutil.copy2(root/'trainer/requirements-teacher.txt',stage/'trainer/requirements-teacher.txt')
+from trainer.chunked_corpus import load_manifest
+load_manifest(root/'trainer/corpus-manifest.json')
+shutil.copy2(root/'trainer/corpus-manifest.json',stage/'trainer/corpus-manifest.json')
 shutil.copy2(root/'LICENSE',stage/'LICENSE')
 payload=out/'payload.zip'
 with zipfile.ZipFile(payload,'w',zipfile.ZIP_DEFLATED) as z:

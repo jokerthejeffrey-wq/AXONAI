@@ -2,8 +2,14 @@ import {DAILY_GLOBAL_JOBS,FAIR_WORKER_JOBS_PER_DAY} from '../server/train-store.
 import status from '../api/status.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {EXPANDED_ARCHITECTURE,LEGACY_ARCHITECTURE,parameterCount,checkpointBytes} from '../server/model-profiles.js';
+import {COMPACT_ARCHITECTURE,EXPANDED_ARCHITECTURE,LEGACY_ARCHITECTURE,parameterCount,checkpointBytes} from '../server/model-profiles.js';
 import {MANIFEST} from '../server/train-core.js';
+
+test('compact research model is bounded and remains separate',()=>{
+ assert.equal(parameterCount(COMPACT_ARCHITECTURE),11_240_448);
+ assert.equal(checkpointBytes(COMPACT_ARCHITECTURE),44_961_792);
+ assert.notDeepEqual(COMPACT_ARCHITECTURE,MANIFEST.architecture);
+});
 
 test('50M research model has verified dimensions without changing deployed manifest',()=>{
  assert.equal(parameterCount(EXPANDED_ARCHITECTURE),50_224_640);

@@ -62,3 +62,13 @@ or widened from a tiny model may initially reply worse than the current one.
 Vercel's current code assumes the old checkpoint shape and chunk count; changing
 the config alone would break every active CPU/GPU worker. Releasing the new
 research track separately avoids discarding any approved volunteer work.
+
+## Compact alternative
+
+`settings.COMPACT_CONFIG` adds a smaller research option with 11,240,448 parameters: six layers, width 384, eight attention heads, and 1,024 byte tokens of context. F32 weights occupy about 45 MB. The Windows release tests take an actual full-model training step. Convert with:
+
+```sh
+python -m trainer.expanded_model --profile axon11m --from-legacy OLD.safetensors --out compact.safetensors
+```
+
+This still exceeds the legacy 32 MB checkpoint cap and requires the separate track, inference support, quality evaluation, and migration described above. It is not the model currently answering on the site. Cached decoding and token sampling improve efficiency and control; they are not evidence of improved reasoning. The existing byte tokenizer stays compatible; a subword tokenizer would require another checkpoint migration.

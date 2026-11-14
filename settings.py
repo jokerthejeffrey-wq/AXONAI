@@ -6,7 +6,9 @@ CONFIG=dict(vocab_size=260,width=256,layers=4,heads=8,context=512)
 # Research track: 50,224,640 trainable parameters. This is not the
 # existing production checkpoint layout; do not point old /api/job at it.
 LARGE_CONFIG=dict(vocab_size=260,width=640,layers=10,heads=8,context=1024)
-TRAINING_PROFILES={'legacy':CONFIG,'axon50m':LARGE_CONFIG}
+# Compact research option: 11,240,448 parameters, about 45 MB float32.
+COMPACT_CONFIG=dict(vocab_size=260,width=384,layers=6,heads=8,context=1024)
+TRAINING_PROFILES={'legacy':CONFIG,'axon11m':COMPACT_CONFIG,'axon50m':LARGE_CONFIG}
 
 def parameter_count(config):
     d,v,c,l=(config['width'],config['vocab_size'],config['context'],config['layers'])

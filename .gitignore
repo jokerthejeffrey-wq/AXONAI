@@ -5,3 +5,8 @@ __pycache__/
 .trainer-gpu/
 .env
 .env.*
+
+.corpus-build/
+.corpus-pages/
+trainer/corpus-manifest.json
+exe-build/

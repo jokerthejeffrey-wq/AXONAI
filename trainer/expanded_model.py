@@ -8,7 +8,7 @@ import argparse
 from pathlib import Path
 import torch
 
-from settings import CONFIG, LARGE_CONFIG, parameter_count
+from settings import CONFIG, LARGE_CONFIG, TRAINING_PROFILES, parameter_count
 from student import Student, load_weights, snapshot
 
 
@@ -78,14 +78,16 @@ def expand_legacy(source, *, seed=50224, target=None):
     return large
 
 
-def create_checkpoint(legacy_path, output, seed=50224):
+def create_checkpoint(legacy_path, output, seed=50224, profile="axon50m"):
     """Generate a complete, hashable, FLOAT32 safetensors research artifact."""
     from safetensors.torch import save_file
     old = Student()
     load_weights(old, Path(legacy_path))
-    upgraded = expand_legacy(old, seed=seed)
+    if profile not in ("axon11m", "axon50m"): raise ValueError("Unknown research profile")
+    target = TRAINING_PROFILES[profile]
+    upgraded = expand_legacy(old, seed=seed, target=target)
     count = sum(t.numel() for t in upgraded.parameters())
-    if count != parameter_count(LARGE_CONFIG):
+    if count != parameter_count(target):
         raise RuntimeError('Expanded architecture parameter mismatch')
     output = Path(output).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -100,9 +102,10 @@ def main(argv=None):
     p.add_argument('--from-legacy', type=Path, required=True,
                    help='existing verified small AXON .safetensors checkpoint')
     p.add_argument('--out', type=Path, default=Path.home()/'.axonai'/'50m'/'research.safetensors')
+    p.add_argument('--profile', choices=['axon11m','axon50m'], default='axon11m')
     p.add_argument('--seed', type=int, default=50224)
     args=p.parse_args(argv)
-    info=create_checkpoint(args.from_legacy,args.out,args.seed)
+    info=create_checkpoint(args.from_legacy,args.out,args.seed,args.profile)
     print(f"Created {info['parameter_count']:,}-parameter checkpoint "
           f"({info['bytes'] / 1e6:.1f} MB) at {info['path']}")
     print('Research only; this file is NOT the currently deployed chat model.')

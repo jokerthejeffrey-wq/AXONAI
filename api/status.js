@@ -1,6 +1,6 @@
 import {getQuality} from '../server/coordinator.js';
 import {publicStatus} from '../server/train-store.js';
-import {parameterCount,LEGACY_ARCHITECTURE,EXPANDED_ARCHITECTURE} from '../server/model-profiles.js';
+import {parameterCount,LEGACY_ARCHITECTURE,EXPANDED_ARCHITECTURE,COMPACT_ARCHITECTURE} from '../server/model-profiles.js';
 export default async function handler(req,res){
   res.setHeader('Cache-Control','no-store');
   if(req.method!=='GET')return res.status(405).json({error:'Use GET.'});
@@ -18,6 +18,8 @@ export default async function handler(req,res){
     active_model_parameters:parameterCount(LEGACY_ARCHITECTURE),
     experimental_model_parameters:parameterCount(EXPANDED_ARCHITECTURE),
     experimental_model_deployed:false,
+    compact_research_parameters:parameterCount(COMPACT_ARCHITECTURE),
+    compact_research_deployed:false,
     distinct_training_contributors_7d:training.contributing_workers_7d??0,
     five_contributors_active:(training.contributing_workers_7d??0)>=5,
     quality:quality?{tested:Boolean(quality.tested),score:quality.score??null,

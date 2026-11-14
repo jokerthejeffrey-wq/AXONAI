@@ -112,7 +112,7 @@ def prepare_environment(gpu, repair, teacher=False):
                 str(ROOT/'trainer'/'requirements-teacher.txt')],meter,65,logfile)
             optional_stamp.write_text(teacher_fingerprint + '\n')
         run_setup_step('Package verification',[str(python),'-m','pip','check'],meter,8,logfile)
-        check='import numpy, pyarrow, psutil, requests, safetensors, torch'
+        check='import numpy, psutil, requests, safetensors, torch'
         if teacher:check+=', transformers'
         if gpu:check+='; assert torch.cuda.is_available(), "CUDA GPU unavailable"'
 
@@ -149,14 +149,14 @@ def preflight(server):
 def main():
     args = sys.argv[1:]
     if '--help' in args:
-        print('AXONAI console trainer: --gpu, --rounds N, --server HTTPS_URL, --yes, --install-only, --repair, --no-teacher')
+        print('AXONAI console trainer: --gpu, --rounds N, --server HTTPS_URL, --yes, --install-only, --repair, --teacher, --no-teacher')
         return 0
     gpu = '--gpu' in args
     try:
         if '--install-only' not in args and '--repair' not in args:
             server = args[args.index('--server')+1] if '--server' in args and args.index('--server')+1 < len(args) else 'https://axonai-theta.vercel.app'
             preflight(server)
-        wants_teacher = '--no-teacher' not in args
+        wants_teacher = '--teacher' in args and '--no-teacher' not in args
         try:
             python = prepare_environment(gpu, '--repair' in args, teacher=wants_teacher)
         except RuntimeError as error:

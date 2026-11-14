@@ -1,9 +1,9 @@
-"""Vercel/Neon/Blob trainer using NumPy or CuPy."""
+"""Full-gradient transformer trainer with on-demand verified lesson pages."""
 import argparse,os,sys,json,hashlib,time,uuid,tempfile
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 import requests
-from trainer.corpus import prepare,read_rows
+from trainer.chunked_corpus import load_manifest, read_assigned
 from trainer.memory import wait, MemoryAdmissionError
 
 def request(session,method,url,**kwargs):
@@ -15,6 +15,7 @@ def request(session,method,url,**kwargs):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--device',choices=['cpu','cuda'],default='cpu');p.add_argument('--server',default='https://axonai-theta.vercel.app');p.add_argument('--rounds',type=int,default=100)
+    p.add_argument('--teacher', action='store_true', help='Optional local pretrained reviewer; adds download and CPU time')
     p.add_argument('--cache',default=str(Path.home()/'.axonai'/'smoltalk-v1'));p.add_argument('--yes',action='store_true');p.add_argument('--no-teacher',action='store_true');args=p.parse_args()
     from urllib.parse import urlparse
     parsed=urlparse(args.server)
@@ -32,7 +33,9 @@ def main():
     print('Training: unique conversational corpus and full-model weight updates.')
     print('Pretrained review is optional; it is never mixed into student weights.', flush=True)
     print('Downloads are cached locally. Press Ctrl+C to stop.', flush=True)
-    wait(512);info=prepare(args.cache)
+    pages=load_manifest();info=pages['corpus']
+    Path(args.cache).mkdir(parents=True,exist_ok=True)
+    print('Fast setup: only assigned lesson pages are downloaded; no 1 GB corpus build.', flush=True)
     wait(512)
     import torch
     from student import Student, load_weights, snapshot, train as train_model
@@ -64,7 +67,7 @@ def main():
                 print(details.get(reason,'Training queue temporarily unavailable.'),flush=True)
                 break
             job=r.json();assignment=job.get('corpus')
-            if not args.no_teacher and not teacher_attempted:
+            if args.teacher and not args.no_teacher and not teacher_attempted:
                 teacher_attempted=True
                 try:
                     wait(800)
@@ -79,7 +82,7 @@ def main():
             arch=job['manifest']['architecture']
             if arch!=model.config:raise RuntimeError('Student architecture mismatch')
             rows=[]
-            for offset,raw in enumerate(read_rows(args.cache,assignment['start'],assignment['count'])):
+            for offset,raw in enumerate(read_assigned(args.cache,pages,assignment['start'],assignment['count'])):
                 print(f"Preparing record {assignment['start']+offset+1}…",flush=True)
                 wait(256)
                 from trainer.corpus import training_context
