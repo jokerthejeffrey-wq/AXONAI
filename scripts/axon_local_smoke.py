@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import itertools
 from pathlib import Path
 import tempfile
 
@@ -27,14 +28,24 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         tokens = core.tokenizer("An unseen Turkish word: nasılsın?")
         assert tokens and all(token in set(vocab) for token in tokens)
 
+        # Verify that the actual neural optimizer reduces next-token error,
+        # not merely that it generates random tokens without crashing.
+        examples = [("hi", "hello there"), ("how are you", "i am doing well")]
+        lookup = {token: i for i, token in enumerate(vocab)}
+        batch = core._trf_make_batch(np, examples, lookup)
+        params, _, _, _ = core.load_transformer(db, np, vocab)
+        params["_active_vocab"] = len(vocab)
+        before, _ = core._trf_loss(np, params, *batch, backward=False)
         trained = core.train_student(
-            db, np,
-            [("hi", "hello there"), ("how are you", "i am doing well")],
-            max_steps=1,
-            print_every=1,
+            db, np, itertools.cycle(examples), max_steps=8, print_every=8
         )
-        assert trained == 1
-        assert int(core.get_meta(db, "transformer_steps", 0)) >= 1
+        params, _, _, _ = core.load_transformer(db, np, vocab)
+        params["_active_vocab"] = len(vocab)
+        after, _ = core._trf_loss(np, params, *batch, backward=False)
+        print(f"Next-token test loss: {before:.3f} -> {after:.3f}")
+        assert trained == 8
+        assert after < before, "AXON optimizer failed to reduce next-token error"
+        assert int(core.get_meta(db, "transformer_steps", 0)) >= 8
 
         pieces = []
         answer = core.transformer_generate(
@@ -50,4 +61,4 @@ assert "retrieve_learned_reply" not in CHAT
 assert "learned_greeting_examples" not in CHAT
 assert "transformer_generate" in CHAT
 assert "Teacher(" not in MANUAL
-print("PASS: BPE tokenizer, Transformer training, token streaming and AXON-only chat.")
+print("PASS: BPE, decreasing neural training loss, autoregressive streaming and AXON-only chat.")
