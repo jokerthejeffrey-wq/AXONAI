@@ -1168,6 +1168,138 @@ def _format_piece(token,previous):
 
 
 
+_GREETING_STARTERS = frozenset({
+    'hi', 'hello', 'hey', 'howdy', 'hiya', 'yo', 'sup', 'greetings'
+})
+_GREETING_PREFIXES = (
+    ('good', 'morning'), ('good', 'afternoon'), ('good', 'evening'),
+    ('what', 's', 'up'), ('whats', 'up'),
+    ('how', 'are', 'you'), ('how', 'are', 'you', 'doing'),
+    ('how', 'you', 'doing'), ('how', 'is', 'it', 'going'),
+    ('how', 's', 'it', 'going'), ('how', 'have', 'you', 'been'),
+    ('how', 'are', 'things'), ('how', 's', 'your', 'day'),
+    ('how', 'was', 'your', 'day'), ('how', 'can', 'i', 'help'),
+    ('what', 'can', 'i', 'help'), ('how', 'may', 'i', 'help'),
+    ('nice', 'to', 'meet', 'you'), ('good', 'to', 'see', 'you'),
+)
+_GREETING_TAILS = frozenset({
+    'there', 'again', 'today', 'everyone', 'everybody', 'folks',
+    'friend', 'friends', 'all', 'guys', 'buddy', 'team', 'yall'
+})
+
+
+def _chat_words(text):
+    """Normalize chat text without punctuation for memory matching."""
+    return [word for word in tokenizer(str(text)) if word.isalnum()]
+
+
+def _lesson_key(text):
+    return ' '.join(_chat_words(text))
+
+
+def _is_social_greeting(text):
+    """Recognize a greeting, not a greeting followed by an unrelated question."""
+    words = _chat_words(text)
+    if not words:
+        return False
+    if any(tuple(words[:len(prefix)]) == prefix for prefix in _GREETING_PREFIXES):
+        return True
+    if words[0] not in _GREETING_STARTERS:
+        return False
+    tail = words[1:]
+    if not tail:
+        return True
+    if any(tuple(tail[:len(prefix)]) == prefix for prefix in _GREETING_PREFIXES):
+        return True
+    return len(tail) <= 3 and all(word in _GREETING_TAILS for word in tail)
+
+
+def learned_greeting_examples(db, limit=12):
+    """Return actual saved greeting lessons, preferring user/teacher conversations."""
+    rows = db.execute(
+        "SELECT prompt,answer,origin FROM lessons "
+        "WHERE origin IN ('user','teacher','dialogue_quality_v5','seed') "
+        "ORDER BY id DESC LIMIT 5000"
+    ).fetchall()
+    custom = [(q, a) for q, a, origin in rows
+              if origin != 'seed' and _is_social_greeting(q) and a.strip()]
+    if not custom:
+        custom = [(q, a) for q, a, origin in rows
+                  if origin == 'seed' and _is_social_greeting(q) and a.strip()]
+    result, seen = [], set()
+    for question, answer in custom:
+        key = _lesson_key(answer)
+        if key and key not in seen:
+            seen.add(key)
+            result.append((question, answer))
+            if len(result) >= max(1, min(int(limit), 100)):
+                break
+    return result
+
+
+def retrieve_learned_reply(db, prompt, history=None):
+    """Retrieve a reply from AXON's saved lessons before free-form generation.
+
+    Exact question matches work for any topic. Short social greetings can also
+    select among greeting replies actually saved from the user's teacher chats.
+    Recent answers are avoided when another learned variant is available.
+    """
+    key = _lesson_key(prompt)
+    if not key:
+        return None
+    rows = db.execute(
+        "SELECT prompt,answer,origin FROM lessons "
+        "WHERE origin IN ('user','teacher','dialogue_quality_v5','seed') "
+        "ORDER BY id DESC LIMIT 6000"
+    ).fetchall()
+    recent_answers = {
+        _lesson_key(answer) for _, answer in (history or [])[-3:] if answer
+    }
+
+    if _is_social_greeting(prompt):
+        candidates = [
+            (question, answer, origin) for question, answer, origin in rows
+            if origin != 'seed' and _is_social_greeting(question)
+            and answer.strip() and len(_chat_words(answer)) <= 90
+        ]
+        if not candidates:
+            candidates = [
+                (question, answer, origin) for question, answer, origin in rows
+                if origin == 'seed' and _is_social_greeting(question)
+                and answer.strip() and len(_chat_words(answer)) <= 90
+            ]
+    else:
+        candidates = [
+            (question, answer, origin) for question, answer, origin in rows
+            if _lesson_key(question) == key and answer.strip()
+        ]
+        if candidates:
+            custom = [item for item in candidates if item[2] != 'seed']
+            if custom:
+                candidates = custom
+
+    if not candidates:
+        return None
+
+    # Deduplicate identical replies, and avoid the last reply if alternatives exist.
+    unique, seen = [], set()
+    for question, answer, origin in candidates:
+        answer_key = _lesson_key(answer)
+        if answer_key and answer_key not in seen:
+            seen.add(answer_key)
+            unique.append((question, answer, origin))
+    alternatives = [item for item in unique if _lesson_key(item[1]) not in recent_answers]
+    pool = alternatives or unique
+    if not pool:
+        return None
+
+    # For manually taught examples, prefer them over automatically generated seed data.
+    priority = {'user': 4, 'dialogue_quality_v5': 3, 'teacher': 2, 'seed': 1}
+    best_priority = max(priority.get(item[2], 0) for item in pool)
+    best = [item for item in pool if priority.get(item[2], 0) == best_priority]
+    return random.choice(best)[1]
+
+
 def transformer_generate(db, prompt, length=80, temperature=0.8, top_k=32,
                          top_p=0.92, on_piece=None, history=None):
     """Autoregressive next-token generation using only AXON's own Transformer."""
