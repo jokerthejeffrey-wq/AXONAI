@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parent
 TRAINER = ROOT / "LLM Train.py"
@@ -14,6 +16,41 @@ spec = importlib.util.spec_from_file_location("axon_train", TRAINER)
 core = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = core
 spec.loader.exec_module(core)
+
+
+class WordPacedPrinter:
+    """Render whole words with >=0.5s between starts; BPE pieces are not words."""
+    def __init__(self, minimum_seconds=0.5):
+        self.minimum_seconds = max(0.5, float(minimum_seconds))
+        self.started_at = time.monotonic()
+        self.last_word_at = None
+        self.pending = ""
+
+    def _print_part(self, part):
+        if part.strip():
+            earliest = (self.last_word_at if self.last_word_at is not None
+                        else self.started_at) + self.minimum_seconds
+            remaining = earliest - time.monotonic()
+            if remaining > 0:
+                time.sleep(remaining)
+            self.last_word_at = time.monotonic()
+        print(part, end="", flush=True)
+
+    def on_piece(self, piece):
+        self.pending += piece
+        # Buffer BPE fragments until the following word boundary.
+        while True:
+            match = re.search(r"\\s+", self.pending)
+            if match is None:
+                break
+            end = match.end()
+            part, self.pending = self.pending[:end], self.pending[end:]
+            self._print_part(part)
+
+    def finish(self):
+        if self.pending:
+            self._print_part(self.pending)
+            self.pending = ""
 
 
 def show_stats(db, vocab):
@@ -136,6 +173,7 @@ def main():
                 continue
 
             print("AXON > ", end="", flush=True)
+            paced = WordPacedPrinter(minimum_seconds=0.5)
             try:
                 answer = core.transformer_generate(
                     db, prompt,
@@ -143,9 +181,10 @@ def main():
                     temperature=core.GENERATION_TEMPERATURE,
                     top_k=core.GENERATION_TOP_K,
                     top_p=core.GENERATION_TOP_P,
-                    on_piece=lambda piece: print(piece, end="", flush=True),
+                    on_piece=paced.on_piece,
                     history=history
                 )
+                paced.finish()
                 if not answer.strip():
                     print("[AXON generated no tokens. Train it on more text.]")
                 else:
