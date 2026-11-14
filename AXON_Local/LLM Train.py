@@ -506,6 +506,8 @@ MAX_GENERATION_TOKENS = 512
 GENERATION_TEMPERATURE = 0.72
 GENERATION_TOP_K = 64
 GENERATION_TOP_P = 0.95
+GENERATION_LOOKAHEAD_BRANCHES = 4
+GENERATION_LOOKAHEAD_WEIGHT = 0.30
 TRANSFORMER_VERSION = 'axon-causal-transformer-v2-bpe'
 TRANSFORMER_CONFIG = {
     'type': 'decoder-only pre-norm causal Transformer',
@@ -1350,7 +1352,50 @@ def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
         probabilities = probabilities[nucleus]
         probabilities /= probabilities.sum()
 
-        choice = int(rng.choice(candidates, p=probabilities))
+        # Deliberate next-token search: choose among several plausible first
+        # tokens by asking AXON's OWN neural weights how well each can continue.
+        # No teacher model, retrieval, hardcoded replies or external AI calls.
+        # A single batched forward pass evaluates all speculative branches.
+        branch_count = min(GENERATION_LOOKAHEAD_BRANCHES, len(candidates))
+        if branch_count > 1:
+            branch_ids = candidates[:branch_count]
+            # All branches have the same number of context tokens.
+            branch_contexts = np.asarray([
+                (context_tokens + [int(token_id)])[-TRANSFORMER_CONTEXT:]
+                for token_id in branch_ids
+            ], dtype=np.int32)
+            future_logits, _ = transformer_forward(np, params, branch_contexts)
+            future_scores = future_logits[:, -1, :len(vocab)].astype('float64')
+            future_scores[:, 0] = -1e9  # pad
+            future_scores[:, 1] = -1e9  # unknown
+            future_scores[:, 3] = -1e9  # role marker
+            future_scores[:, 4] = -1e9  # role marker
+            if step < 7:
+                future_scores[:, 2] = -1e9  # avoid abrupt beginnings
+
+            # The best possible follow-up token probability is a bounded
+            # coherence proxy, NOT human-like reasoning or an answer checker.
+            scaled_future = future_scores / temperature
+            max_future = scaled_future.max(axis=1)
+            shifted_future = scaled_future - max_future[:, None]
+            future_log_norm = np.log(
+                np.maximum(
+                    np.exp(np.clip(shifted_future, -80.0, 0.0)).sum(axis=1),
+                    1e-12
+                )
+            )
+            # A coherent continuation should be plausible *and* predictable.
+            # Keep the original next-token probabilities as the main signal.
+            branch_log_weight = (
+                np.log(np.maximum(probabilities[:branch_count], 1e-12))
+                - GENERATION_LOOKAHEAD_WEIGHT * future_log_norm
+            )
+            branch_log_weight -= branch_log_weight.max()
+            branch_weights = np.exp(branch_log_weight)
+            branch_weights /= np.maximum(branch_weights.sum(), 1e-12)
+            choice = int(rng.choice(branch_ids, p=branch_weights))
+        else:
+            choice = int(rng.choice(candidates, p=probabilities))
         if choice == 2:
             break
 
