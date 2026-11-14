@@ -61,6 +61,7 @@ def main():
 
     np = core.ensure_numpy()
     print("AXON AI | causal Transformer | word-by-word generation")
+    print(f"Trainer source: {Path(core.__file__).resolve()}")
     print(
         f"{core.TRANSFORMER_LAYERS} layers · {core.TRANSFORMER_HEADS} attention heads · "
         f"{core.TRANSFORMER_DIM}-dimension · {core.TRANSFORMER_CONTEXT}-token context"
