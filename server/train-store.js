@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import { put } from '@vercel/blob';
+import { put,del } from '@vercel/blob';
 import crypto from 'node:crypto';
 import {CHUNK_BYTES,MAX_CHECKPOINT,BATCH,MANIFEST,makeLessons,sha256,packChunks,mergeWeights,workerOK,idOK,tokenOK} from './train-core.js';
 import fs from 'node:fs';
@@ -104,6 +104,91 @@ async function authorizedJob(sql,id,secret){
   check(new Date(j.issued_at).getTime()>Date.now()-72*3600_000,'Job expired',409);
   return j;
 }
+// Cleanup deletes only no-longer-needed Vercel Blob objects to stay within
+// the Hobby 1 GB storage limit. Active jobs and recent model checkpoints stay.
+export async function reclaimStorage(sql){
+  const owner=crypto.randomBytes(16).toString('hex');
+  await sql`INSERT INTO axon_queue_lease(id,owner,locked_until)
+    VALUES (2,'',to_timestamp(0)) ON CONFLICT DO NOTHING`;
+  const [lease]=await sql`UPDATE axon_queue_lease
+    SET owner=${owner},locked_until=now()+interval '120 seconds'
+    WHERE id=2 AND locked_until<now() RETURNING id`;
+  if(!lease)return {busy:true,reclaimed:0};
+  let reclaimed=0;
+  try{
+    // A submission is no longer needed once it is approved or rejected.
+    // Expired unsent jobs are unusable after 72 hours by design.
+    const dead=await sql`SELECT p.url FROM axon_parts p JOIN axon_jobs j ON j.id=p.job_id
+      WHERE j.status IN ('approved','rejected')
+        OR (j.status='issued' AND j.issued_at<now()-interval '72 hours')
+      ORDER BY j.issued_at ASC LIMIT 80`;
+    if(dead.length){
+      const urls=dead.map(row=>row.url);
+      await del(urls);
+      await sql`DELETE FROM axon_parts WHERE url IN
+        (SELECT jsonb_array_elements_text(${JSON.stringify(urls)}::jsonb))`;
+      reclaimed+=urls.length;
+    }
+    // Retain four recent versions and all models used by a live job.
+    // The version-zero original checkpoint lives separately in public/model.
+    const stale=await sql`SELECT c.version,c.parts FROM axon_checkpoints c
+      WHERE c.version < (SELECT val FROM axon_meta WHERE key='version')-3
+        AND NOT EXISTS(SELECT 1 FROM axon_jobs j
+          WHERE j.version=c.version AND j.status IN ('issued','pending')
+            AND j.issued_at>now()-interval '72 hours')
+      ORDER BY c.version ASC LIMIT 4`;
+    for(const entry of stale){
+      const parts=typeof entry.parts==='string'?JSON.parse(entry.parts):entry.parts;
+      const urls=parts.map(part=>part.url);
+      if(urls.length)await del(urls);
+      await sql`DELETE FROM axon_checkpoints WHERE version=${Number(entry.version)}
+        AND version < (SELECT val FROM axon_meta WHERE key='version')-3
+        AND NOT EXISTS(SELECT 1 FROM axon_jobs j WHERE j.version=${Number(entry.version)}
+          AND j.status IN ('issued','pending') AND j.issued_at>now()-interval '72 hours')`;
+      reclaimed+=urls.length;
+    }
+    if(reclaimed)console.info('AXON reclaimed obsolete Blob objects:',reclaimed);
+    return {busy:false,reclaimed};
+  }finally{
+    await sql`UPDATE axon_queue_lease SET owner='',locked_until=to_timestamp(0)
+      WHERE id=2 AND owner=${owner}`;
+  }
+}
+
+async function storagePut(sql,key,bytes,options){
+  try{
+    return await put(key,bytes,options);
+  }catch(error){
+    const message=String(error?.message||'');
+    const code=String(error?.code||error?.cause?.code||'unknown').replace(/[^A-Za-z0-9_-]/g,'').slice(0,48);
+    const safe=message.replace(/https?:\/\/\S+/gi,'[url]')
+      .replace(/(?:token|password|secret|key)\s*[:=]\s*\S+/gi,'[credential]').slice(0,180);
+    console.error('AXON Blob write error:',code,safe);
+    if(/storage quota exceeded/i.test(message)){
+      let cleanup;
+      try{cleanup=await reclaimStorage(sql)}
+      catch(e){
+        console.error('AXON storage cleanup failed:',String(e?.name||'Error').slice(0,50));
+        throw new TrainError('Storage quota reached and cleanup unavailable; checkpoint saved locally by updated trainers.',507);
+      }
+      if(cleanup.busy)throw new TrainError('Storage cleanup in progress. Retry this chunk shortly.',503);
+      if(cleanup.reclaimed>0){
+        try{return await put(key,bytes,options)}
+        catch(second){console.error('AXON Blob write after cleanup:',String(second?.message||'unknown').slice(0,150));}
+      }
+      throw new TrainError('Hobby Blob storage is full (1 GB). Safe cleanup could not free enough space; owner must increase storage capacity.',507);
+    }
+    throw new TrainError('Checkpoint storage is temporarily unavailable. Retry this same chunk.',503);
+  }
+}
+
+// Authenticated recovery probe for clients whose final response was lost.
+export async function submissionState(id,secret){
+  const sql=await db();
+  const job=await authorizedJob(sql,id,secret);
+  return {status:job.status,sha256:job.sha256||null,size:job.size?Number(job.size):null};
+}
+
 export async function uploadPart(job,secret,index,buffer){
   check(Buffer.isBuffer(buffer)&&buffer.length>0&&buffer.length<=CHUNK_BYTES,'Invalid checkpoint chunk',413);
   check(Number.isInteger(index)&&index>=0&&index<16,'Invalid chunk index');
@@ -111,22 +196,8 @@ export async function uploadPart(job,secret,index,buffer){
   check(j.status==='issued','Job is already submitted',409);
   const [existing]=await sql`SELECT url,size FROM axon_parts WHERE job_id=${job} AND part_index=${index}`;
   if(existing){check(Number(existing.size)===buffer.length,'Chunk already uploaded with different size',409);return {ok:true,part:index};}
-  let blob;
-  try{
-    blob=await put(`training/submissions/${job}/${index}-${crypto.randomBytes(6).toString('hex')}.bin`,buffer,
-      {access:'public',contentType:'application/octet-stream',addRandomSuffix:false,cacheControlMaxAge:60});
-  }catch(error){
-    // The old generic 503 hid ALL Blob errors. Log only a bounded,
-    // credential-redacted diagnostic; never expose tokens or blob URLs.
-    const code=String(error?.code||error?.cause?.code||'unknown').replace(/[^A-Za-z0-9_-]/g,'').slice(0,48);
-    const status=Number(error?.status||error?.statusCode||error?.cause?.status||0);
-    const message=String(error?.message||'unknown')
-      .replace(/https?:\/\/\S+/gi,'[url]')
-      .replace(/(?:token|password|secret|key)\s*[:=]\s*\S+/gi,'[credential]')
-      .slice(0,200);
-    console.error('AXON Blob upload failed',code,Number.isSafeInteger(status)?status:0,message);
-    throw new TrainError('Checkpoint storage upload unavailable. Retrying the same chunk is safe.',503);
-  }
+  const blob=await storagePut(sql,`training/submissions/${job}/${index}-${crypto.randomBytes(6).toString('hex')}.bin`,buffer,
+    {access:'public',contentType:'application/octet-stream',addRandomSuffix:false,cacheControlMaxAge:60});
   await sql`INSERT INTO axon_parts(job_id,part_index,url,size) VALUES(${job},${index},${blob.url},${buffer.length}) ON CONFLICT DO NOTHING`;
   return {ok:true,part:index};
 }
@@ -235,7 +306,7 @@ async function integrateJob(sql,j,{automatic=false}={}){
   if(automatic)validateCandidate(current,merged);
   const next=version+1,urls=[];
   for(const [i,part] of packChunks(merged).entries()){
-    const out=await put(`training/approved/v${next}/${i}-${crypto.randomBytes(6).toString('hex')}.bin`,part,{
+    const out=await storagePut(sql,`training/approved/v${next}/${i}-${crypto.randomBytes(6).toString('hex')}.bin`,part,{
       access:'public',contentType:'application/octet-stream',addRandomSuffix:false,cacheControlMaxAge:60
     });
     urls.push({url:out.url,size:part.length});
