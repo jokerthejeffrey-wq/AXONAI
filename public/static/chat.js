@@ -58,7 +58,12 @@ async function generate(outgoing,token,bubbleEl){
       if(!line)continue;
       const event=JSON.parse(line);
       if(event.type==='error')throw Error(event.error||'Student stream failed.');
-      if(event.type==='meta'){mode=event.mode;showChatMode(mode);}
+      if(event.type==='meta'){
+        mode=event.mode;showChatMode(mode);
+        if(event.phase==='drafting')statusEl.textContent='AXON is drafting and reviewing the reply…';
+      }
+      if(event.type==='phase'&&event.phase==='responding')
+        statusEl.textContent='AXON is streaming at a minimum of 0.5 seconds per word…';
       if(event.type==='delta'){reply+=event.text;bubbleEl.textContent=reply;}
       if(event.type==='done')done=true;
     }
@@ -76,7 +81,7 @@ document.getElementById('composer').onsubmit=async e=>{
     const token=window.axonSecurityToken();
     document.getElementById('welcome').hidden=true;
     userBubble=bubble('user',text);prompt.value='';resize();
-    statusEl.textContent=previewEl.checked?'Sampling unverified AXON weights…':'Sampling AXON student tokens…';
+    statusEl.textContent=previewEl.checked?'Drafting with unverified AXON weights…':'AXON is drafting and reviewing its answer…';
     const outgoing=[...messages.slice(-12),{role:'user',content:text}];
     assistantBubble=bubble('assistant','');
     const result=await generate(outgoing,token,assistantBubble);
