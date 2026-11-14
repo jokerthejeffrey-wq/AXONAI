@@ -36,7 +36,7 @@ jobs:
           $z=[IO.Compression.ZipFile]::OpenRead((Join-Path $pwd 'exe-build/payload.zip'))
           try {
             $names=$z.Entries.FullName
-            foreach ($item in @('student.pyc','trainer/start.pyc','trainer/progress.pyc','trainer/teacher.pyc','trainer/requirements-teacher.txt')) {
+            foreach ($item in @('student.pyc','trainer/start.pyc','trainer/progress.pyc','trainer/teacher.pyc','trainer/requirements-teacher.txt','trainer/expanded_model.pyc','trainer/eval_50m.pyc')) {
               if ($names -notcontains $item) { throw "Missing packed file: $item" }
             }
           } finally { $z.Dispose() }
