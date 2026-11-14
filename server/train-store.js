@@ -111,8 +111,22 @@ export async function uploadPart(job,secret,index,buffer){
   check(j.status==='issued','Job is already submitted',409);
   const [existing]=await sql`SELECT url,size FROM axon_parts WHERE job_id=${job} AND part_index=${index}`;
   if(existing){check(Number(existing.size)===buffer.length,'Chunk already uploaded with different size',409);return {ok:true,part:index};}
-  const blob=await put(`training/submissions/${job}/${index}-${crypto.randomBytes(6).toString('hex')}.bin`,buffer,
-    {access:'public',contentType:'application/octet-stream',addRandomSuffix:false,cacheControlMaxAge:60});
+  let blob;
+  try{
+    blob=await put(`training/submissions/${job}/${index}-${crypto.randomBytes(6).toString('hex')}.bin`,buffer,
+      {access:'public',contentType:'application/octet-stream',addRandomSuffix:false,cacheControlMaxAge:60});
+  }catch(error){
+    // The old generic 503 hid ALL Blob errors. Log only a bounded,
+    // credential-redacted diagnostic; never expose tokens or blob URLs.
+    const code=String(error?.code||error?.cause?.code||'unknown').replace(/[^A-Za-z0-9_-]/g,'').slice(0,48);
+    const status=Number(error?.status||error?.statusCode||error?.cause?.status||0);
+    const message=String(error?.message||'unknown')
+      .replace(/https?:\/\/\S+/gi,'[url]')
+      .replace(/(?:token|password|secret|key)\s*[:=]\s*\S+/gi,'[credential]')
+      .slice(0,200);
+    console.error('AXON Blob upload failed',code,Number.isSafeInteger(status)?status:0,message);
+    throw new TrainError('Checkpoint storage upload unavailable. Retrying the same chunk is safe.',503);
+  }
   await sql`INSERT INTO axon_parts(job_id,part_index,url,size) VALUES(${job},${index},${blob.url},${buffer.length}) ON CONFLICT DO NOTHING`;
   return {ok:true,part:index};
 }
