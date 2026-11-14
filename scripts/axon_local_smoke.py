@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
+import runpy
+import time
 import itertools
 from pathlib import Path
 import tempfile
@@ -48,12 +52,41 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert int(core.get_meta(db, "transformer_steps", 0)) >= 8
 
         pieces = []
-        answer = core.transformer_generate(
-            db, "hi", length=8, temperature=0.72, top_k=32, top_p=0.95,
-            on_piece=pieces.append,
-        )
+        original_forward = core.transformer_forward
+        forward_calls = [0]
+        def count_forward(*args, **kwargs):
+            forward_calls[0] += 1
+            return original_forward(*args, **kwargs)
+        core.transformer_forward = count_forward
+        try:
+            answer = core.transformer_generate(
+                db, "hi", length=8, temperature=0.72, top_k=32, top_p=0.95,
+                on_piece=pieces.append,
+            )
+        finally:
+            core.transformer_forward = original_forward
         assert isinstance(answer, str)
         assert pieces, "AXON did not stream any generated tokens"
+        assert forward_calls[0] >= 2, "Speculative neural lookahead was not used"
+        print(f"AXON neural forward passes for token generation: {forward_calls[0]}")
+
+# Verify minimum 0.5 seconds per complete word, not per BPE fragment.
+chat_module = runpy.run_path(str(ROOT / "AXON_Local" / "CHAT.py"), run_name="axon_pacer_test")
+pacer = chat_module["WordPacedPrinter"](minimum_seconds=0.5)
+output = io.StringIO()
+with contextlib.redirect_stdout(output):
+    start = time.monotonic()
+    pacer.on_piece("hel")
+    pacer.on_piece("lo ")
+    first = time.monotonic()
+    pacer.on_piece("wor")
+    pacer.on_piece("ld")
+    pacer.finish()
+    second = time.monotonic()
+assert first - start >= 0.48, "First word appeared before 0.5 seconds"
+assert second - first >= 0.48, "Next word appeared before 0.5 seconds"
+assert output.getvalue() == "hello world", "BPE fragments failed to assemble into whole words"
+print(f"Word intervals: {first - start:.3f}s, {second - first:.3f}s")
 
 CHAT = (ROOT / "AXON_Local" / "CHAT.py").read_text(encoding="utf-8")
 MANUAL = (ROOT / "AXON_Local" / "MANUAL Chat.py").read_text(encoding="utf-8")
@@ -61,4 +94,4 @@ assert "retrieve_learned_reply" not in CHAT
 assert "learned_greeting_examples" not in CHAT
 assert "transformer_generate" in CHAT
 assert "Teacher(" not in MANUAL
-print("PASS: BPE, decreasing neural training loss, autoregressive streaming and AXON-only chat.")
+print("PASS: BPE, decreasing loss, 4-branch neural lookahead, >=0.5s/word, AXON-only generation.")
