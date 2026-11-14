@@ -8,6 +8,7 @@ from trainer.memory import wait, MemoryAdmissionError
 from trainer.assignments import rounds, claim_until_ready
 from trainer.lessons import source_lessons
 from trainer.progress import bar
+from trainer.outbox import save_checkpoint,flush_pending
 
 def request(session,method,url,**kwargs):
     for attempt in range(10):
@@ -57,6 +58,8 @@ def main():
     worker=worker_file.read_text().strip();session=requests.Session()
     trained_total=0
     try:
+        # Resume previously trained weights BEFORE reserving another unique job.
+        flush_pending(args.cache,session,base)
         model=Student().to(args.device)
         for n in rounds(args.rounds):
             wait(512)
@@ -123,11 +126,10 @@ def main():
                 load_weights(model,file)
                 # Do not replay this reservation, even if upload fails after training.
                 train_model(model,rows,args.device,before_step=lambda:wait(256))
-                save_file(snapshot(model),str(file));data=file.read_bytes();chunk_size=2_500_000
-                parts=(len(data)+chunk_size-1)//chunk_size
-                for index in range(parts):
-                    request(session,'POST',base+'/api/update-part',data=data[index*chunk_size:(index+1)*chunk_size],headers={'Content-Type':'application/octet-stream','X-AXON-Job':job['id'],'X-AXON-Token':job['upload_token'],'X-AXON-Part':str(index)})
-                result=request(session,'POST',base+'/api/update',json={'job':job['id'],'token':job['upload_token'],'parts':parts,'size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
+                save_file(snapshot(model),str(file))
+                data=file.read_bytes()
+                save_checkpoint(args.cache,job,base,data)
+                flush_pending(args.cache,session,base)
                 trained_total+=len(rows)
                 print(f'Round {n+1} complete: {len(rows)} local optimizer steps, '
                       f'{trained_total} total this session. Checkpoint SUBMITTED for '

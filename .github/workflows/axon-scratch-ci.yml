@@ -26,5 +26,5 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: python3 -m pip install --disable-pip-version-check psutil==7.0.0
-      - run: python3 -m unittest trainer.test_assignments trainer.test_lessons trainer.test_corpus trainer.test_teacher trainer.test_memory trainer.test_expanded_model trainer.test_chunked_corpus -v
+      - run: python3 -m unittest trainer.test_outbox trainer.test_assignments trainer.test_lessons trainer.test_corpus trainer.test_teacher trainer.test_memory trainer.test_expanded_model trainer.test_chunked_corpus -v
       - run: python3 -m compileall -q trainer student.py
