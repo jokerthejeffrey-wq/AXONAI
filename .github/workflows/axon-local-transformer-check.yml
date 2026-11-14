@@ -1,0 +1,25 @@
+name: AXON local Transformer validation
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate-local-transformer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install NumPy
+        run: python -m pip install --only-binary=:all: "numpy>=1.26"
+      - name: Compile AXON local files
+        run: |
+          python -m py_compile "AXON_Local/LLM Train.py" "AXON_Local/CHAT.py" "AXON_Local/LLM Chat.py" "AXON_Local/MANUAL Chat.py" scripts/axon_local_smoke.py
+      - name: Test BPE, gradients, checkpoint and autoregressive token streaming
+        run: python scripts/axon_local_smoke.py
