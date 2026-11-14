@@ -1796,8 +1796,33 @@ def main():
     with connection() as db:
         bootstrap_lessons(db)
         if args.offline:
-            say('Offline: learning from saved human/assistant Q&A pairs and seed lessons.')
-            learn_observations(db,np,steps=args.steps)
+            # Offline --forever must actually train until Ctrl+C, not quit after
+            # a single 400-step cycle as older releases did.
+            count = db.execute(
+                "SELECT COUNT(*) FROM lessons "
+                "WHERE origin IN ('seed','user','teacher','dialogue_quality_v5')"
+            ).fetchone()[0]
+            say(f'Offline: {count:,} saved human/assistant training examples.')
+            if count < 500:
+                say(
+                    'WARNING: Very little training data. Repeating a small dataset '
+                    'does not make a fluent language model. Gather varied, accurate conversations.'
+                )
+            cycle = 0
+            while True:
+                cycle += 1
+                say(
+                    f'AXON offline training cycle {cycle:,}: '
+                    f'{args.steps:,} gradient batches | Ctrl+C safely saves weights'
+                )
+                learn_observations(db, np, steps=args.steps)
+                say(
+                    f'Checkpoint: {int(get_meta(db, "transformer_steps", 0)):,} total batches '
+                    f'| validation loss {get_meta(db, "transformer_validation_loss", "n/a")} '
+                    f'| database {DB_PATH.stat().st_size / 1024**2:.0f} MiB'
+                )
+                if not args.forever:
+                    break
         else:
             model=ensure_teacher(db)
             def training_loop(human_model,assistant_model):
