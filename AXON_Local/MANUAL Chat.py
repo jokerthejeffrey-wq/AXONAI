@@ -166,7 +166,7 @@ def main():
         print("AXON MANUAL CHAT: YOU + one pretrained local assistant.")
         print(f"Loaded {len(history)} saved exchanges from BRAIN.db." )
         print("Teacher remembers recent chat turns, and AXON learns from both sides.")
-        print("Commands: :memory 10  :new  :stats  :train 300  :axon question  :quit")
+        print("Commands: :memory 10  :learned greetings  :new  :stats  :train 300  :axon question  :quit")
         model = axon.ensure_teacher(db)
         with axon.Teacher(model, parallel=1, role="Manual teacher") as teacher:
             while True:
@@ -197,17 +197,32 @@ def main():
                         count = 10
                     show_memory(db, session, limit=count)
                     continue
+                if cmd == ":learned greetings":
+                    examples = axon.learned_greeting_examples(db, limit=20)
+                    if not examples:
+                        print("No saved greeting lessons found yet.")
+                    else:
+                        print(f"AXON has {len(examples)} saved greeting examples:")
+                        for question, answer in examples:
+                            print(f"  Human > {question}")
+                            print(f"  AXON memory > {answer}")
+                    continue
                 if cmd.startswith(":axon "):
                     question = user_text[len(":axon "):].strip()
-                    print("AXON student > ", end="", flush=True)
-                    try:
-                        axon.student_generate(
-                            db, question,
-                            on_piece=lambda part: print(part, end="", flush=True)
-                        )
-                    except Exception as exc:
-                        print("AXON student error:", exc)
-                    print()
+                    learned = axon.retrieve_learned_reply(db, question, history=history)
+                    if learned:
+                        print("AXON student [learned memory] > " + learned)
+                    else:
+                        print("AXON student > ", end="", flush=True)
+                        try:
+                            axon.student_generate(
+                                db, question,
+                                on_piece=lambda part: print(part, end="", flush=True),
+                                history=history
+                            )
+                        except Exception as exc:
+                            print("AXON student error:", exc)
+                        print()
                     continue
                 if cmd.startswith(":train"):
                     try:
