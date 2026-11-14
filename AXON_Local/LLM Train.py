@@ -49,8 +49,7 @@ TEACHER_SHA = '74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db'
 MAX_DB_BYTES = 15 * 1024**3
 MAX_MODEL_BYTES = 2 * 1024**3
 VOCAB_SIZE = 16384
-DIM = 768
-PARAMETERS = 2 * VOCAB_SIZE * DIM
+DIM = 768  # legacy v5 embedding width; retained only to read/archive old checkpoints
 USER_AGENT = 'AXON-FourFile/1.1 (local educational LLM)'
 TOKEN_RE = re.compile(r"<user>|<assistant>|<eos>|[^\W\d_]+|\d+|[^\w\s]", re.UNICODE)
 
@@ -818,7 +817,7 @@ def load_transformer(db, np, vocab=None):
         except (KeyError, ValueError, zlib.error):
             version_ok = False
     if not version_ok:
-        db.execute("DELETE FROM weights WHERE key LIKE 'trf\\_%' ESCAPE '\\'")
+        db.execute("DELETE FROM weights WHERE substr(key,1,4)='trf_'")
         params = _trf_initialize(np)
         moment1 = {name: np.zeros_like(value) for name, value in params.items()}
         moment2 = {name: np.zeros_like(value) for name, value in params.items()}
@@ -908,7 +907,8 @@ def transformer_forward(np, params, token_ids):
         np, x, params['final_ln_g'], params['final_ln_b']
     )
     # Tied input/output token embeddings.
-    logits = final @ params['tok_emb'][:len(vocab_for_forward(params))].T
+    active_vocab = int(params.get('_active_vocab', VOCAB_SIZE))
+    logits = final @ params['tok_emb'][:active_vocab].T
     cache = {
         'ids': ids, 'blocks': block_caches, 'final': final,
         'final_ln': final_cache, 'active_vocab': logits.shape[-1],
