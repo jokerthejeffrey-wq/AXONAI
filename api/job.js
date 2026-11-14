@@ -4,4 +4,5 @@ export default async function handler(req,res){noCache(res);if(!method(req,res,'
  try{const body=req.body||{};if(!body||typeof body!=='object'||Array.isArray(body)||JSON.stringify(body).length>1000)return res.status(400).json({error:'Invalid job request'});
  const job=await claim(body.worker,body.corpus||null);
  if(job===null){res.setHeader('X-AXON-Queue','review-pending');return res.status(204).end();}
+ if(job?.deferred){res.setHeader('X-AXON-Queue',job.reason);return res.status(204).end();}
  return res.status(200).json(job);}catch(e){return sendError(res,e)} }
