@@ -50,7 +50,9 @@ function generateInBrowser(outgoing,assistantBubble){
   return new Promise((resolve,reject)=>{
     let done=false,reply='';
     const timer=setTimeout(()=>{
-      cleanup();reject(Error('Model loading or generation took too long. Check your connection and available device memory.'));
+      cleanup();
+      if(modelWorker===worker){worker.terminate();modelWorker=null;}
+      reject(Error('Model loading or generation took too long. Check your connection and available device memory.'));
     },300000);
     function cleanup(){
       clearTimeout(timer);
