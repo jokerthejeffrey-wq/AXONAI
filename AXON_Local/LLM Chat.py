@@ -68,6 +68,10 @@ def show_stats(db, vocab):
     print(f"Tokenizer: {len(vocab):,} tokens | {merges:,} learned BPE merges")
     print(f"Training batches: {step:,} | validation loss: {validation}")
     print(f"BRAIN.db: {core.DB_PATH.stat().st_size / 1024**2:.1f} MiB / 15360 MiB")
+    print(
+        f"Neural lookahead: {core.GENERATION_LOOKAHEAD_BRANCHES} branches, "
+        f"one speculative token each; minimum word-display interval 0.5 seconds."
+    )
     print("No saved-answer retrieval, no canned greeting system, no external chat model.")
 
 
@@ -79,6 +83,10 @@ def main():
         f"{core.TRANSFORMER_HEADS} heads | {core.TRANSFORMER_CONTEXT}-token context"
     )
     print("Every response is generated token by token by AXON itself.")
+    print(
+        f"Deliberate search: {core.GENERATION_LOOKAHEAD_BRANCHES} neural branches "
+        f"per token; at least 0.5 seconds between displayed words."
+    )
     print("Type :help for commands.")
 
     with core.connection() as db:
