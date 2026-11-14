@@ -3,6 +3,10 @@ on:
   push:
     branches: [installer-eta-dual-teacher-20261114, fix-ram-admission-compact-teacher, fix-teacher-loader-progress-20261114, axon-50m-research-track]
   workflow_dispatch:
+concurrency:
+  group: research-check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 jobs:
