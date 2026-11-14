@@ -25,13 +25,86 @@ sys.modules[spec.name] = axon
 spec.loader.exec_module(axon)
 
 SYSTEM = (
-    "You are a friendly, knowledgeable local AI having a conversation with a real human. "
-    "Reply directly to the human's latest message. For a greeting, greet naturally. "
-    "For a question, give a clear and accurate answer with a specific example if useful. "
-    "Do not give the same generic help offer after every reply. "
-    "Do not imitate a human speaking to an assistant. "
-    "Use natural wording; vary sentence structures appropriately."
+    "You are a friendly, knowledgeable assistant talking with a real person. "
+    "Read the previous conversation turns before responding. "
+    "React naturally to what was just said and to the earlier dialogue. "
+    "If the user greets you again, acknowledge the repeat casually, for example "
+    "'Hey again!' or 'Hi again!', rather than pretending this is the first greeting. "
+    "Do NOT repeat the same greeting or generic offer to help in every answer. "
+    "If the user refers to a detail mentioned earlier, use it accurately when visible "
+    "in the supplied history. If it is not visible, say you do not recall. "
+    "Answer questions clearly, use natural variety, and do not invent memories."
 )
+
+
+def get_manual_session(db, fresh=False):
+    """Keep one manual conversation across restarts until :new is requested."""
+    session = None if fresh else axon.get_meta(db, "manual_chat_active_session_v1")
+    if not session and not fresh:
+        row = db.execute(
+            "SELECT session FROM observations "
+            "WHERE session LIKE 'manual-%' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        session = row[0] if row else None
+    if not session:
+        session = "manual-" + uuid.uuid4().hex[:12]
+    axon.set_meta(db, "manual_chat_active_session_v1", session)
+    db.commit()
+    return session
+
+
+def load_history(db, session, limit=40):
+    """Reload actual words from BRAIN.db, not a paraphrase of the conversation."""
+    rows = db.execute(
+        "SELECT speaker, message FROM ("
+        " SELECT id, speaker, message FROM observations "
+        " WHERE session=? AND speaker IN ('Human','Assistant') "
+        " ORDER BY id DESC LIMIT ?"
+        ") ORDER BY id ASC",
+        (session, max(2, limit * 2)),
+    ).fetchall()
+    pairs = []
+    current_human = None
+    for speaker, message in rows:
+        if speaker == "Human":
+            current_human = message
+        elif speaker == "Assistant" and current_human is not None:
+            pairs.append((current_human, message))
+            current_human = None
+    return pairs
+
+
+def conversation_messages(history, user_text):
+    """Use recent turns within a bounded context to avoid model context overflow."""
+    chosen = []
+    characters = 0
+    for human, assistant in reversed(history[-12:]):
+        human, assistant = human[:750], assistant[:1100]
+        cost = len(human) + len(assistant)
+        if chosen and characters + cost > 3600:
+            break
+        if cost > 3600 and not chosen:
+            human, assistant = human[-700:], assistant[-1400:]
+            cost = len(human) + len(assistant)
+        chosen.append((human, assistant))
+        characters += cost
+    messages = [{"role": "system", "content": SYSTEM}]
+    for human, assistant in reversed(chosen):
+        messages.append({"role": "user", "content": human})
+        messages.append({"role": "assistant", "content": assistant})
+    messages.append({"role": "user", "content": user_text[:1500]})
+    return messages
+
+
+def show_memory(db, session, limit=10):
+    history = load_history(db, session, limit=max(1, min(limit, 30)))
+    if not history:
+        print("No previous exchanges saved in this conversation.")
+        return
+    print(f"Last {len(history)} saved exchanges (your words + AI replies):")
+    for number, (human, assistant) in enumerate(history, 1):
+        print(f"  {number}. You > {human}")
+        print(f"     Pretrained AI > {assistant}")
 
 
 def statistics(db):
@@ -70,6 +143,10 @@ def main():
         help="student gradient batches after each teacher reply (0 means save only)"
     )
     parser.add_argument("--max-tokens", type=int, default=220)
+    parser.add_argument(
+        "--new", action="store_true",
+        help="Start a fresh conversation rather than resume the last saved chat"
+    )
     args = parser.parse_args()
     if args.steps < 0:
         parser.error("--steps must be 0 or more")
@@ -77,16 +154,20 @@ def main():
         parser.error("--max-tokens must be at least 10")
 
     np = axon.ensure_numpy()
-    session = "manual-" + uuid.uuid4().hex[:12]
     with axon.connection() as db:
         axon.bootstrap_lessons(db)
-        model = axon.ensure_teacher(db)
-        history = []
-        recent = []
-        turn = 0
+        session = get_manual_session(db, fresh=args.new)
+        history = load_history(db, session, limit=40)
+        recent = list(history[-25:])
+        turn = db.execute(
+            "SELECT COALESCE(MAX(turn),0) FROM observations WHERE session=?",
+            (session,)
+        ).fetchone()[0] // 2
         print("AXON MANUAL CHAT: YOU + one pretrained local assistant.")
-        print("Each teacher answer is saved and trains your own AXON student.")
-        print("Commands: :stats   :train 300   :axon your question   :quit")
+        print(f"Loaded {len(history)} saved exchanges from BRAIN.db." )
+        print("Teacher remembers recent chat turns, and AXON learns from both sides.")
+        print("Commands: :memory 10  :new  :stats  :train 300  :axon question  :quit")
+        model = axon.ensure_teacher(db)
         with axon.Teacher(model, parallel=1, role="Manual teacher") as teacher:
             while True:
                 try:
@@ -101,6 +182,20 @@ def main():
                     break
                 if cmd == ":stats":
                     statistics(db)
+                    continue
+                if cmd == ":new":
+                    session = get_manual_session(db, fresh=True)
+                    history.clear()
+                    recent.clear()
+                    turn = 0
+                    print("Started a fresh chat. Previous transcripts are still stored in BRAIN.db.")
+                    continue
+                if cmd.startswith(":memory"):
+                    try:
+                        count = int(user_text.split()[1])
+                    except (IndexError, ValueError):
+                        count = 10
+                    show_memory(db, session, limit=count)
                     continue
                 if cmd.startswith(":axon "):
                     question = user_text[len(":axon "):].strip()
@@ -135,16 +230,10 @@ def main():
                         teach_student(db, np, examples, steps)
                     continue
                 if user_text.startswith(":"):
-                    print("Unknown command. Use :stats, :train 300, :axon ... or :quit")
+                    print("Unknown command. Use :memory 10, :new, :stats, :train 300, :axon ... or :quit")
                     continue
 
-                messages = [{"role": "system", "content": SYSTEM}]
-                for human, assistant in history[-6:]:
-                    messages.extend((
-                        {"role": "user", "content": human},
-                        {"role": "assistant", "content": assistant},
-                    ))
-                messages.append({"role": "user", "content": user_text[:1500]})
+                messages = conversation_messages(history, user_text)
                 print("Pretrained AI > ", end="", flush=True)
                 try:
                     response = teacher.complete(
@@ -154,7 +243,7 @@ def main():
                 except Exception as exc:
                     print(f"\nThe teacher failed: {exc}. This turn was not saved.")
                     continue
-                response = " ".join(response.split()).strip()
+                response = response.strip()
                 if not response or any(
                     marker in response
                     for marker in ("<|im_start|>", "<|im_end|>", "\ufffd")
@@ -176,7 +265,9 @@ def main():
                     turn += 1
                     if args.steps:
                         teach_student(db, np, recent[-12:], args.steps)
-                    print("AXON recorded this exchange and updated its weights.")
+                    print("AXON saved your words and the AI reply in BRAIN.db.")
+                    if args.steps:
+                        print("AXON also updated its own next-word weights.")
                 except KeyboardInterrupt:
                     print("\nInterrupted; previously saved data remains.")
                     break
