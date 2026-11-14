@@ -86,7 +86,7 @@ jobs:
         shell: pwsh
         run: |
           $runtime = "$env:LOCALAPPDATA/AXONAI/environments/python312-cpu/Scripts/python.exe"
-          & $runtime -m unittest trainer.test_generation trainer.test_expanded_model trainer.test_chunked_corpus -v
+          & $runtime -m unittest trainer.test_assignments trainer.test_generation trainer.test_expanded_model trainer.test_chunked_corpus -v
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish verified trainers as release assets (no Git push)
         shell: pwsh
