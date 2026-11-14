@@ -1653,7 +1653,7 @@ def main():
     parser=argparse.ArgumentParser(description='Parallel human/assistant conversations train AXON locally')
     parser.add_argument('--chats',type=int,default=4,help='simultaneous human/assistant chats (default: 4, max: 12)')
     parser.add_argument('--rounds',type=int,default=8,help='messages PER chat; even number, default: 8 (4 Q&A pairs)')
-    parser.add_argument('--steps',type=int,default=400,help='student neural gradient batches per cycle (default: 400)')
+    parser.add_argument('--steps',type=int,default=400,help='causal Transformer Adam batches per cycle (default: 400)')
     parser.add_argument('--topic',type=str,default=None,help='one practical human question topic for all chats')
     parser.add_argument('--forever',dest='forever',action='store_true',default=True,help='continue until Ctrl+C (default)')
     parser.add_argument('--once',dest='forever',action='store_false',help='only one cycle')
@@ -1672,7 +1672,7 @@ def main():
     if sys.version_info<(3,11):raise RuntimeError('Python 3.11 or newer is required.')
     say('AXON AI | continuous varied Human/Assistant conversations')
     say(f'{len(ALL_SCENARIOS):,} learning categories, {len(STYLE_MODES)} speaking styles; Ctrl+C to stop.')
-    say(f'Student: {PARAMETERS:,} parameters. Maximum BRAIN.db: 15 GiB.')
+    say(f'Student: {PARAMETERS:,}-parameter causal Transformer ({TRANSFORMER_LAYERS} layers, {TRANSFORMER_HEADS} heads). Maximum BRAIN.db: 15 GiB.')
     say(f'Human and Assistant use separate local Qwen processes by default, with {args.chats} slots each.')
     np=ensure_numpy()
     with connection() as db:
