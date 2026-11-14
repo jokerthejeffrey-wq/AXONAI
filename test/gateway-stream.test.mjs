@@ -22,14 +22,13 @@ test('Gateway SSE chunks stream actual decoded subword content',async()=>{
  for await(const delta of gatewayDeltas({body}))parts.push(delta);
  assert.deepEqual(parts,['Hello',' there!']);
 });
-test('Browser worker uses a true tokenizer and weight-backed generation, not fixed greetings',()=>{
- const source=readFileSync('public/static/local-model-worker.js','utf8');
- assert.match(source,/TextStreamer/);
- assert.match(source,/generator\.tokenizer/);
- assert.match(source,/pipeline\('text-generation'/);
- assert.match(source,/onnx-community/);
- assert.doesNotMatch(source,/My student model is still training/);
+test('Public browser uses only AXON scratch checkpoints',()=>{
  const ui=readFileSync('public/static/chat.js','utf8');
- assert.match(ui,/new Worker\(/);
- assert.doesNotMatch(ui,/Hello! I'm AXON AI/);
+ const server=readFileSync('api/chat.js','utf8');
+ assert.match(ui,/experimental-preview/);
+ assert.match(server,/scratchStream/);
+ assert.match(server,/loadStudent/);
+ assert.equal(ui.includes('new Worker('),false);
+ assert.doesNotMatch(ui,/generateInBrowser|generateFromCloud/);
+ assert.doesNotMatch(server,/beginGateway|browser_model_required|Qwen/);
 });

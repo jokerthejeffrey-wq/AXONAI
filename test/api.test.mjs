@@ -15,15 +15,15 @@ test('Conversation validation rejects malformed roles and oversized input',()=>{
  assert.throws(()=>validateMessages([{role:'user',content:'Hi'},{role:'assistant',content:'Hi'}]));
  assert.equal(validateMessages([{role:'user',content:'Hello'}]).length,1);
 });
-test('Chat never fabricates identity text when the pretrained backend is unavailable',async()=>{
+test('Chat never fabricates identity text while scratch weights are unverified',async()=>{
  const res=response();await chat({method:'POST',headers:{},body:{messages:[{role:'user',content:'Who created you?'}]}},res);
- assert.equal(res.code,503);assert.equal(res.body.code,'browser_model_required');
+ assert.equal(res.code,503);assert.equal(res.body.code,'student_training');
  assert.equal(res.body.reply,undefined);
 });
 test('Method and JSON errors are useful JSON responses',async()=>{
  let res=response();await chat({method:'GET',headers:{}},res);assert.equal(res.code,405);
  res=response();await chat({method:'POST',headers:{},body:'broken json'},res);assert.equal(res.code,400);assert.ok(res.body.error);
 });
-test('Status truthfully reports cloud chat and unconfigured training',async()=>{
+test('Status truthfully reports scratch chat and unconfigured training',async()=>{
  const res=response();await status({method:'GET'},res);assert.equal(res.body.hosting,'vercel');assert.equal(res.body.training_available,false);
 });

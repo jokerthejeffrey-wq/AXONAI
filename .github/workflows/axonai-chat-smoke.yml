@@ -1,45 +1,47 @@
-name: AXON AI chat live smoke test
+name: AXON AI scratch-only live smoke test
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 jobs:
   test-chat:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Verify real production chat reply
+      - name: Verify scratch inference or honest training status
         shell: bash
         run: |
           python3 - <<'PY'
-          import json, sys, urllib.request, urllib.error
-          url = 'https://axonai-theta.vercel.app/api/chat'
-          request = urllib.request.Request(url, data=json.dumps({
-            'messages':[{'role':'user','content':'Please say hello.'}]
-          }).encode(), headers={
-            'Content-Type':'application/json',
-            'Origin':'https://axonai-theta.vercel.app',
-            'User-Agent':'AXONAI-Live-Smoke/1.0'
-          }, method='POST')
-          try:
-              with urllib.request.urlopen(request, timeout=75) as response:
-                  body=json.load(response)
-                  print('HTTP status:',response.status)
-                  if response.status==200 and isinstance(body.get('reply'),str) and body['reply'].strip():
-                      print('Chat reply received; length:',len(body['reply']))
-                      sys.exit(0)
-                  print('Chat returned no reply. Diagnostic code:',str(body.get('code','unknown'))[:80])
-          except urllib.error.HTTPError as exc:
+          import json, sys, time, urllib.request, urllib.error
+          base='https://axonai-theta.vercel.app'
+          for attempt in range(1,9):
+              with urllib.request.urlopen(base+'/api/status',timeout=18) as response:
+                  state=json.load(response)
+              if state.get('chat_mode') not in ('scratch-training','scratch-student'):
+                  print('Waiting for scratch deployment, attempt',attempt,flush=True)
+                  time.sleep(10)
+                  continue
+              if state.get('student_pretrained_weights') is not False or state.get('chat_requires_gateway') is not False:
+                  raise SystemExit('Scratch-only status invalid')
+              request=urllib.request.Request(base+'/api/chat',data=json.dumps({
+                  'messages':[{'role':'user','content':'Please say hello.'}]
+              }).encode(),headers={'Content-Type':'application/json','Origin':base,
+              'User-Agent':'AXONAI-Scratch-Smoke/1.0'},method='POST')
               try:
-                  body=json.load(exc)
-              except Exception:
-                  body={}
-              print('HTTP status:',exc.code,'Diagnostic code:',str(body.get('code','unknown'))[:80])
-          except Exception as exc:
-              print('Chat request failed:',type(exc).__name__)
-          sys.exit(1)
+                  with urllib.request.urlopen(request,timeout=90) as response:
+                      data=json.load(response)
+                      if response.status==200 and data.get('mode')=='student' and data.get('reply','').strip():
+                          print('PASS: Approved scratch student replied.')
+                          sys.exit(0)
+              except urllib.error.HTTPError as error:
+                  data=json.load(error)
+                  if error.code==503 and data.get('code')=='student_training' and state.get('chat_student_ready') is False and 'reply' not in data:
+                      print('PASS: Student is training; no pretrained fallback.')
+                      sys.exit(0)
+                  print('Unexpected status:',error.code,'code:',data.get('code'))
+                  raise
+              raise SystemExit('Unexpected scratch chat response')
+          raise SystemExit('Scratch chat did not become available')
           PY

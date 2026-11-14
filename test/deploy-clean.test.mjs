@@ -27,6 +27,8 @@ test('Deployment has no old pretrained weights or runtime',()=>{
 test('Status shows from-scratch model, never a gateway dependency',async()=>{
  const res=response();await status({method:'GET',headers:{}},res);
  assert.equal(res.code,200);
- assert.equal(res.body.local_model_installed,true);
+ assert.equal(res.body.local_model_installed,false);
+ assert.equal(res.body.chat_mode,'scratch-training');
+ assert.equal(res.body.student_pretrained_weights,false);
  assert.equal(res.body.chat_requires_gateway,false);
 });

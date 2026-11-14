@@ -9,7 +9,8 @@ test('Chat route imports scratch model and never invokes pretrained or browser m
   assert.doesNotMatch(code,/beginGateway|assistedAnswer|Qwen|browser_model_required/);
   const ui=fs.readFileSync('public/static/chat.js','utf8');
   assert.match(ui,/experimental-preview/);
-  assert.doesNotMatch(ui,/new Worker\\(|generateFromCloud|generateInBrowser/);
+  assert.equal(ui.includes('new Worker('),false);
+  assert.doesNotMatch(ui,/generateFromCloud|generateInBrowser/);
 });
 test('Preview must be a real boolean',()=>{
   assert.equal(parseChatBody({headers:{},body:{messages:[],preview:true}}).preview,true);
