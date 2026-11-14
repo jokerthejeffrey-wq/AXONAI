@@ -42,7 +42,7 @@ export default async function handler(req,res){
   const mode=ready?'student':'experimental-student';
   if(body.stream!==true){
     try{
-      const reply=scratchGenerate(model,messages,{maxNewTokens:128,temperature:.75,topP:.9});
+      const reply=scratchGenerate(model,messages,{maxNewTokens:128,temperature:.55,topK:16,topP:.8,repetitionPenalty:1.15});
       if(!reply || (ready&&!readableReply(reply)))
         return res.status(503).json({code:'student_training',error:'AXON student could not produce a readable reply yet.'});
       return res.status(200).json({reply,mode,version,tokenizer:'utf8-bytes-v1',verified:ready});
@@ -54,7 +54,7 @@ export default async function handler(req,res){
   res.write(JSON.stringify({type:'meta',mode,model:'AXON AI scratch Transformer',version,verified:ready})+'\n');
   try{
     let output='';
-    for await(const chunk of scratchStream(model,messages,{maxNewTokens:128,temperature:.75,topP:.9})){
+    for await(const chunk of scratchStream(model,messages,{maxNewTokens:128,temperature:.55,topK:16,topP:.8,repetitionPenalty:1.15})){
       if(res.destroyed)break;
       output+=chunk;
       if(output.length>1024)throw Error('Model output limit');

@@ -73,14 +73,17 @@ def load_weights(model,path):
         if t.shape!=expected[k].shape or t.dtype!=torch.float32 or not torch.isfinite(t).all(): raise ValueError('Invalid tensor')
     model.load_state_dict(incoming,strict=True)
 
-def tensors(row,device,context=None):
+def tensors(row,device,context=None,prompt_supervision=False):
     context=context or CONFIG['context']
     prefix=conversation(row['messages'])+[ASSISTANT]
     target=encode(row['response'])+[END]
     if len(prefix)+len(target)>context+1: raise ValueError('Lesson too long: shorten context or response')
     seq=prefix+target
     x=torch.tensor([seq[:-1]],device=device)
-    y=torch.tensor([seq[1:]],device=device);y[:,:len(prefix)-1]=-100
+    y=torch.tensor([seq[1:]],device=device)
+    if not prompt_supervision:
+        # Validation measures the assistant answer, not its input prompt.
+        y[:,:len(prefix)-1]=-100
     return x,y
 
 def train(model,rows,device,before_step=None):
@@ -88,8 +91,17 @@ def train(model,rows,device,before_step=None):
     model.train();opt=torch.optim.AdamW(model.parameters(),lr=3e-4,weight_decay=.01)
     for i,row in enumerate(rows):
         if before_step:before_step()
-        x,y=tensors(row,device,model.config['context']);opt.zero_grad(set_to_none=True)
-        loss=F.cross_entropy(model(x).reshape(-1,260),y.reshape(-1),ignore_index=-100)
+        # Train language modelling on the *actual source prompt* as well as the
+        # answer. 20% context weight improves supervision on short answers
+        # without making the model learn to parrot prompts instead of replying.
+        x,y=tensors(row,device,model.config['context'],prompt_supervision=True)
+        opt.zero_grad(set_to_none=True)
+        logits=model(x)
+        per_token=F.cross_entropy(logits.reshape(-1,logits.shape[-1]),
+                                  y.reshape(-1),reduction='none').reshape_as(y)
+        weights=torch.ones_like(per_token)
+        weights[:,:len(conversation(row['messages']))]=0.20
+        loss=(per_token*weights).sum()/weights.sum()
         if not torch.isfinite(loss):raise ValueError('Nonfinite loss; update not uploaded')
         loss.backward();nn.utils.clip_grad_norm_(model.parameters(),1);opt.step()
         print(f"Lesson {i+1}/{len(rows)} | {row['concept']} | loss {loss.item():.4f}",flush=True)

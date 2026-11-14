@@ -29,6 +29,15 @@ class LocalTeacherTests(unittest.TestCase):
             {'role':'assistant','content':'Answer\x00'}]}))
         self.assertFalse(teacher.review_source({'messages': []}))
 
+    def test_long_source_answer_is_still_eligible_for_short_context_training(self):
+        teacher=Teacher()
+        long_source={'messages':[{'role':'user','content':'Summarize this topic.'},
+                                 {'role':'assistant','content':('Useful explanatory text. '*50)}]}
+        self.assertTrue(teacher.review_source(long_source))
+        # The teacher must still reject unsafe control characters.
+        long_source['messages'][1]['content']+='\\x00'
+        self.assertFalse(teacher.review_source(long_source))
+
     def test_variation_preserves_original_answer(self):
         teacher=Teacher()
         source=self.sample()

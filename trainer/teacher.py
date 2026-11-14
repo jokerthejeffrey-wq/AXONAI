@@ -24,7 +24,9 @@ class Teacher:
         if context[-1]['role'] != 'user':
             return False
         # Gate 1: ensure UTF-8 lengths and structure are bounded.
-        if len(answer.encode('utf-8')) > 700 or len(answer.strip()) < 2:
+        # The trainer truncates long answers to its 512-token context window.
+        # Do not discard otherwise valid examples solely for being >700 bytes.
+        if len(answer.encode('utf-8')) > 32768 or len(answer.strip()) < 2:
             return False
         # Gate 2: reject control characters and blank/duplicate content.
         texts=[m.get('content','') for m in context]

@@ -23,3 +23,7 @@ The RAM admission check pauses before estimated usage exceeds 90%; it cannot gua
 ## Continuous training
 
 The default CPU and GPU trainer session runs indefinitely with --rounds 0. Use --rounds 20 to limit a session to twenty jobs. During server review congestion, the console displays a waiting status and checks again later. Ctrl+C stops training. The session ends normally when all unique dataset records have been assigned; hardware, electricity, bandwidth, available data and service costs still constrain training.
+
+## More useful training signal
+
+The trainer now gives each source-prompt token 20% of an assistant token's language-model loss, while keeping assistant responses at full weight. This learns byte and word patterns from both sides of verified conversations without a downloaded pretrained model. Held-out evaluation remains answer-only. Long source answers can be shortened to the existing 512-token window instead of always being discarded by the local helper. The chat sampler is more conservative for experimental checkpoints. These changes improve use of training data but cannot make the 3.4M-parameter model conversational after just dozens of updates.

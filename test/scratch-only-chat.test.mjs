@@ -23,3 +23,9 @@ test('The local teacher contains no downloaded or pretrained runtime',()=>{
   const starter=fs.readFileSync('trainer/start.py','utf8');
   assert.match(starter,/teacher=False/);
 });
+
+test('Experimental student sampling is conservative, still learned rather than hardcoded',()=>{
+ const api=fs.readFileSync('api/chat.js','utf8');
+ assert.equal((api.match(/temperature:\\.55,topK:16,topP:\\.8/g)||[]).length,2);
+ assert.doesNotMatch(api,/if\\s*\\(\\s*messages\\[0\\].content\\s*===\\s*['\"]hi/);
+});
