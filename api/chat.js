@@ -18,7 +18,7 @@ export default async function handler(req,res){
   let body,messages;
   try{body=parseChatBody(req);messages=validateMessages(body.messages);}
   catch(error){return res.status(error.status||400).json({error:error.status?error.message:'Invalid message.'});}
-  if(generating||!memoryAdmit()){res.setHeader('Retry-After','5');return res.status(429).json({error:'Waiting for model memory.',retryable:true});}
+  // Lightweight greeting/assisted chat does not need a full checkpoint loaded.
   const verification=await verifyTurnstile(req,body.turnstileToken,turnstileConfig());
   if(!verification.ok)return res.status(verification.status).json({error:verification.error});
   const limited=rateLimit(req,'generations');
@@ -29,7 +29,7 @@ export default async function handler(req,res){
   try{
     const quality=await getQuality();
     if(body.stream===true && quality?.tested===true && quality?.ready===true && Number(quality.version)>0){
-      if(generating){res.setHeader('Retry-After','5');return res.status(429).json({error:'Model busy.',retryable:true});}
+      if(generating||!memoryAdmit()){res.setHeader('Retry-After','5');return res.status(429).json({error:'Model busy or insufficient memory.',retryable:true});}
       generating=true;
       try{
         const model=await loadStudent(Number(quality.version));

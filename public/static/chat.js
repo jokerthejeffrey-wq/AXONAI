@@ -116,5 +116,4 @@ function showChatMode(mode) {
     mode === 'learning' ? '· student still training' :
     mode === 'student' ? '· evaluated student' : '';
 }
-axonFetch('/api/status').then(r => { if (!r.ok) throw Error(); return r.json(); })
-  .then(showChatMode).catch(() => { document.getElementById('chat-mode').textContent = ''; });
+// The actual mode is shown after the chat reply, not guessed from status.

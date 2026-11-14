@@ -160,7 +160,10 @@ def main():
         try:
             python = prepare_environment(gpu, '--repair' in args, teacher=wants_teacher)
         except RuntimeError as error:
-            if not wants_teacher or 'Local pretrained reviewer failed' not in str(error):
+            if not wants_teacher or not any(
+                label in str(error) for label in
+                ('Local pretrained reviewer failed', 'Runtime verification failed')
+            ):
                 raise
             print('Optional pretrained checker setup failed. Starting student training without it.', flush=True)
             wants_teacher = False

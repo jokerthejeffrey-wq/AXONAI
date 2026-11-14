@@ -6,7 +6,9 @@ export default async function handler(req,res){
   if(req.method!=='GET')return res.status(405).json({error:'Use GET.'});
   const [quality,training]=await Promise.all([getQuality(),publicStatus()]);
   return res.status(200).json({
-    ok:true,model:'AXON AI',hosting:'vercel',chat_mode:'local-scratch',
+    ok:true,model:'AXON AI',hosting:'vercel',
+    chat_mode:process.env.AXON_CHAT_MODE==='student'?'local-scratch':
+      (process.env.AI_GATEWAY_API_KEY?'pretrained-assistance-with-student-fallback':'local-scratch'),
     chat_requires_gateway:false,local_model_installed:true,
     training_available:Boolean(training.training_available),
     training_status_reason:training.reason||null,
