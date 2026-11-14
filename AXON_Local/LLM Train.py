@@ -1062,7 +1062,12 @@ def save_transformer(db, np, params, moment1, moment2, step):
         for name, array in collection.items():
             if name.startswith('_'):
                 continue
-            payload = zlib.compress(np.asarray(array, dtype='<f4').tobytes(), 1)
+            # CUDA arrays are copied to host for the portable SQLite checkpoint.
+            # CPU/GPU checkpoints share identical float32 serialization.
+            host_array = array.get() if hasattr(array, 'get') else array
+            payload = zlib.compress(
+                ensure_numpy().asarray(host_array, dtype='<f4').tobytes(), 1
+            )
             db.execute(
                 'INSERT OR REPLACE INTO weights(key,value) VALUES(?,?)',
                 (prefix + name, sqlite3.Binary(payload))
@@ -1365,25 +1370,96 @@ def transformer_validation_loss(db, np, params, vocab, limit=40):
     return float(sum(losses) / len(losses)) if losses else None
 
 
-def train_student(db, np, rows, max_steps=2000, print_every=100):
-    """Train the causal Transformer with Adam and masked full-softmax cross entropy."""
+def train_student(db, np, rows, max_steps=2000, print_every=100,
+                  device='auto', resource_profile='balanced'):
+    """CPU-prepared batches, adaptive throttling, optional CUDA/CuPy gradients.
+
+    In GPU mode, tokenization and SQLite remain on CPU, while the actual
+    Transformer forward/backward/Adam math runs on NVIDIA CUDA.
+    NumPy remains the reliable fallback and no downloads occur here.
+    """
+    cpu_np = ensure_numpy()
+    governor = AdaptiveResources(resource_profile)
+    xp = governor.choose_backend(device) or cpu_np
+    gpu = xp is not cpu_np
+
     vocab = build_vocabulary(db)
     lookup = {word: index for index, word in enumerate(vocab)}
-    params, moment1, moment2, total_steps = load_transformer(db, np, vocab)
+    params, moment1, moment2, total_steps = load_transformer(db, cpu_np, vocab)
+    if gpu:
+        params = {name: xp.asarray(value) for name, value in params.items()}
+        moment1 = {name: xp.asarray(value) for name, value in moment1.items()}
+        moment2 = {name: xp.asarray(value) for name, value in moment2.items()}
+        say('Backend: NVIDIA CUDA / CuPy (CPU handles tokenization, validation data and SQLite).')
+    else:
+        say('Backend: NumPy CPU (CuPy is optional and was not loaded).')
+    say('Adaptive resources: ' + governor.describe())
     params['_active_vocab'] = len(vocab)
-    batch_examples = []
     batch_count = 0
     last_loss = 0.0
     started = time.monotonic()
     print_every = max(1, int(print_every))
 
-    def update(examples):
+    # Bounded CPU producer: prepares the next batch while GPU/CPU optimizes
+    # the current batch. Maximum two waiting batches limits additional RAM.
+    prepared = queue.Queue(maxsize=2)
+    stop_prefetch = threading.Event()
+
+    def prefetch():
+        pending = []
+        try:
+            for question, answer in rows:
+                if stop_prefetch.is_set():
+                    break
+                if not question.strip() or not answer.strip():
+                    continue
+                pending.append((question, answer))
+                if len(pending) < TRANSFORMER_BATCH:
+                    continue
+                batch = _trf_make_batch(cpu_np, pending, lookup)
+                pending.clear()
+                if batch is not None:
+                    while not stop_prefetch.is_set():
+                        try:
+                            prepared.put(batch, timeout=0.2)
+                            break
+                        except queue.Full:
+                            continue
+            if pending and not stop_prefetch.is_set():
+                batch = _trf_make_batch(cpu_np, pending, lookup)
+                if batch is not None:
+                    while not stop_prefetch.is_set():
+                        try:
+                            prepared.put(batch, timeout=0.2)
+                            break
+                        except queue.Full:
+                            continue
+        except Exception as exc:
+            while not stop_prefetch.is_set():
+                try:
+                    prepared.put(exc, timeout=0.2)
+                    break
+                except queue.Full:
+                    continue
+        finally:
+            while not stop_prefetch.is_set():
+                try:
+                    prepared.put(None, timeout=0.2)
+                    break
+                except queue.Full:
+                    continue
+
+    feeder = threading.Thread(target=prefetch, daemon=True, name='axon_cpu_tokenizer')
+    feeder.start()
+
+    def update(batch):
         nonlocal batch_count, total_steps, last_loss
-        batch = _trf_make_batch(np, examples, lookup)
-        if batch is None:
-            return
-        last_loss, gradients = _trf_loss(np, params, *batch, backward=True)
-        norm_sq = sum(float((grad * grad).sum()) for grad in gradients.values())
+        governor.throttle()
+        if gpu:
+            batch = tuple(xp.asarray(item) for item in batch)
+        last_loss, gradients = _trf_loss(xp, params, *batch, backward=True)
+        # GPU: reduce all gradient norms on-device and synchronize once.
+        norm_sq = float(sum((grad * grad).sum() for grad in gradients.values()))
         grad_scale = min(1.0, 1.0 / max(math.sqrt(norm_sq), 1e-8))
         total_steps += 1
         lr = 0.00045 * min(1.0, total_steps / 12.0) / math.sqrt(1.0 + total_steps / 5000.0)
@@ -1398,24 +1474,29 @@ def train_student(db, np, rows, max_steps=2000, print_every=100):
             moment2[name] += (1.0 - beta2) * (grad * grad)
             m_hat = moment1[name] / correction1
             v_hat = moment2[name] / correction2
-            params[name] -= lr * m_hat / (np.sqrt(v_hat) + 1e-8)
+            params[name] -= lr * m_hat / (xp.sqrt(v_hat) + 1e-8)
             if name.endswith(('wq', 'wk', 'wv', 'wo', 'w1', 'w2')):
                 params[name] *= (1.0 - lr * 0.01)
         batch_count += 1
 
     try:
-        for question, answer in rows:
-            if not question.strip() or not answer.strip():
-                continue
-            batch_examples.append((question, answer))
-            if len(batch_examples) < TRANSFORMER_BATCH:
-                continue
-            update(batch_examples)
-            batch_examples.clear()
+        while max_steps is None or batch_count < int(max_steps):
+            item = prepared.get()
+            if item is None:
+                break
+            if isinstance(item, Exception):
+                raise item
+            update(item)
             if batch_count and batch_count % print_every == 0:
-                save_transformer(db, np, params, moment1, moment2, total_steps)
-                val = transformer_validation_loss(db, np, params, vocab, limit=32)
-                set_meta(db, 'transformer_validation_loss', 'n/a' if val is None else f'{val:.5f}')
+                save_transformer(db, cpu_np, params, moment1, moment2, total_steps)
+                # Small validation sample avoids long foreground stalls.
+                val = transformer_validation_loss(
+                    db, xp, params, vocab, limit=16
+                )
+                set_meta(
+                    db, 'transformer_validation_loss',
+                    'n/a' if val is None else f'{val:.5f}'
+                )
                 db.commit()
                 elapsed = max(time.monotonic() - started, 0.001)
                 val_text = 'n/a' if val is None else f'{val:.3f}'
@@ -1423,19 +1504,18 @@ def train_student(db, np, rows, max_steps=2000, print_every=100):
                     f'Transformer batch {batch_count:,}'
                     + (f'/{max_steps:,}' if max_steps is not None else '')
                     + f' | train loss {last_loss:.3f} | validation loss {val_text}'
-                    + f' | {elapsed:.1f}s'
+                    + f' | {elapsed:.1f}s | {"CUDA" if gpu else "CPU"}'
                 )
-            if max_steps is not None and batch_count >= int(max_steps):
-                break
     except KeyboardInterrupt:
         say('\nInterrupted: saving Transformer weights and Adam state...')
-        save_transformer(db, np, params, moment1, moment2, total_steps)
+        save_transformer(db, cpu_np, params, moment1, moment2, total_steps)
         raise
+    finally:
+        stop_prefetch.set()
+        feeder.join(timeout=1.0)
 
-    if batch_examples and (max_steps is None or batch_count < int(max_steps)):
-        update(batch_examples)
-    save_transformer(db, np, params, moment1, moment2, total_steps)
-    val = transformer_validation_loss(db, np, params, vocab, limit=64)
+    save_transformer(db, cpu_np, params, moment1, moment2, total_steps)
+    val = transformer_validation_loss(db, xp, params, vocab, limit=32)
     set_meta(db, 'transformer_validation_loss', 'n/a' if val is None else f'{val:.5f}')
     db.commit()
     say(
@@ -1444,6 +1524,7 @@ def train_student(db, np, rows, max_steps=2000, print_every=100):
         + ('n/a (need held-out lessons)' if val is None else f'{val:.3f}')
     )
     return batch_count
+
 
 def _format_piece(token, previous):
     """Convert one BPE token to a streaming text fragment."""
