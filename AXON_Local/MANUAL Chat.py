@@ -3,7 +3,7 @@
 Put MANUAL Chat.py beside LLM Train.py and BRAIN.db.
 You type as the human; ONE local pretrained Qwen model responds.
 The messages are saved as training examples in the existing SQLite brain.
-AXON's separate neural student receives real next-token gradient updates.
+AXON's separate causal Transformer receives real next-token gradient updates.
 Python 3.11+; uses the existing AXON trainer dependencies.
 """
 from __future__ import annotations
@@ -115,7 +115,7 @@ def statistics(db):
     steps = axon.get_meta(db, "student_steps", "0")
     db_size = axon.DB_PATH.stat().st_size / (1024 * 1024)
     print(f"AXON: {answers:,} teacher Q&A lessons, {observations:,} saved notes, "
-          f"{steps} neural training batches; BRAIN.db {db_size:.1f}/15360 MiB")
+          f"{steps} Transformer training batches; BRAIN.db {db_size:.1f}/15360 MiB")
 
 
 def teach_student(db, np, pairs, steps):
@@ -140,7 +140,7 @@ def main():
     )
     parser.add_argument(
         "--steps", type=int, default=40,
-        help="student gradient batches after each teacher reply (0 means save only)"
+        help="Transformer Adam batches after each teacher reply (0 means save only)"
     )
     parser.add_argument("--max-tokens", type=int, default=220)
     parser.add_argument(
@@ -267,7 +267,7 @@ def main():
                         teach_student(db, np, recent[-12:], args.steps)
                     print("AXON saved your words and the AI reply in BRAIN.db.")
                     if args.steps:
-                        print("AXON also updated its own next-word weights.")
+                        print("AXON also updated its own Transformer weights.")
                 except KeyboardInterrupt:
                     print("\nInterrupted; previously saved data remains.")
                     break
