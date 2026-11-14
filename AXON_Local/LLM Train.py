@@ -670,7 +670,8 @@ def build_vocabulary(db, max_lines=2000):
         db.execute("DELETE FROM weights WHERE key IN ('emb_in','emb_out')")
         db.execute(
             "DELETE FROM meta WHERE key IN "
-            "('vocab_json','student_steps','bpe_merges_json','tokenizer_version')"
+            "('vocab_json','student_steps','bpe_merges_json','tokenizer_version',
+             'transformer_steps','transformer_version','transformer_config','transformer_validation_loss')"
         )
         set_meta(db, 'student_arch', STUDENT_ARCH)
         db.commit()
@@ -1270,6 +1271,7 @@ def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
     """Generate every reply with AXON's own causal Transformer, one BPE token at a time."""
     np = ensure_numpy()
     vocab = build_vocabulary(db)
+    vocab = extend_vocabulary(db, prompt)
     if int(get_meta(db, 'transformer_steps', 0)) <= 0:
         return '[AXON Transformer has not been trained yet. Run LLM Train.py first.]'
     params, _, _, _ = load_transformer(db, np, vocab)
@@ -1774,22 +1776,27 @@ def main():
     parser.add_argument('--forever',dest='forever',action='store_true',default=True,help='continue until Ctrl+C (default)')
     parser.add_argument('--once',dest='forever',action='store_false',help='only one cycle')
     parser.add_argument('--shared-model',action='store_true',help='use one local Qwen server for both roles (less memory, not separate processes)')
-    parser.add_argument('--offline',action='store_true',help='train from existing notes and user lessons, no download')
+    parser.add_argument('--offline',action='store_true',default=True,help='AXON-only training from saved examples (default)')
+    parser.add_argument('--teacher',action='store_true',help='optional: generate extra training data with a separate local teacher model')
     parser.add_argument('--corpus-examples',type=int,default=0,help='extra synthetic corpus rows (default: 0)')
     parser.add_argument('--all',action='store_true',help='also use entire synthetic corpus; very slow and not conversational')
     parser.add_argument('--distill',type=int,default=None,help='legacy alias for --rounds')
     parser.add_argument('--examples',type=int,default=None,help='legacy alias for --corpus-examples')
     args=parser.parse_args()
+    if args.teacher:args.offline=False
     if args.distill is not None:args.rounds=args.distill
     if args.examples is not None:args.corpus_examples=args.examples
     if not 1<=args.chats<=12:parser.error('--chats must be between 1 and 12')
     if not 2<=args.rounds<=200:parser.error('--rounds must be between 2 and 200')
     if args.steps<1:parser.error('--steps must be at least 1')
     if sys.version_info<(3,11):raise RuntimeError('Python 3.11 or newer is required.')
-    say('AXON AI | continuous varied Human/Assistant conversations')
+    say('AXON AI | standalone NumPy autoregressive Transformer training')
     say(f'{len(ALL_SCENARIOS):,} learning categories, {len(STYLE_MODES)} speaking styles; Ctrl+C to stop.')
     say(f'Student: {PARAMETERS:,}-parameter causal Transformer ({TRANSFORMER_LAYERS} layers, {TRANSFORMER_HEADS} heads). Maximum BRAIN.db: 15 GiB.')
-    say(f'Human and Assistant use separate local Qwen processes by default, with {args.chats} slots each.')
+    if args.teacher:
+        say('Optional teacher-data mode enabled; chat responses still come only from AXON.')
+    else:
+        say('AXON-only mode: no external model is downloaded or used.')
     np=ensure_numpy()
     with connection() as db:
         bootstrap_lessons(db)
@@ -1823,7 +1830,8 @@ def main():
                 train_student(db,np,example_lines(None if args.all else max(0,args.corpus_examples)),
                               max_steps=None if args.all else max(1,args.steps))
         say('Done. Run LLM Chat.py to interact with AXON student word-by-word.')
-        say('More learning: python "LLM Train.py" --chats 8 --rounds 10 --steps 1200')
+        say('More learning: python "LLM Train.py" --steps 1200')
+        say('Optional external data generation only: python "LLM Train.py" --teacher --chats 4 --rounds 8')
 
 if __name__=='__main__':
     try:main()
