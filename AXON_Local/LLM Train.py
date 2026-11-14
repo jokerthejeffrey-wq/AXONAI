@@ -1727,38 +1727,60 @@ def agent_dialogue(db, teacher, turns=8, topic=None, display=True):
     return str(sessions),pairs*2
 
 
-def learn_observations(db,np,steps=250,epochs=25):
-    """Train on 90% of lessons; reserve every tenth lesson for held-out validation."""
-    rows=db.execute(
-        "SELECT prompt,answer FROM lessons "
-        "WHERE origin='dialogue_quality_v5' AND id % 10 != 0 "
-        "ORDER BY id DESC LIMIT 3000"
-    ).fetchall()
-    seeds=db.execute(
-        "SELECT prompt,answer FROM lessons "
-        "WHERE origin IN ('seed','user','teacher') AND id % 10 != 0 "
-        "ORDER BY id DESC LIMIT 1500"
-    ).fetchall()
-    if not rows and not seeds:
-        say('No training examples available; skipping.')
+def learn_observations(db, np, steps=250, epochs=25):
+    """Train real next-token gradients using balanced conversational data.
+
+    A small number of explicitly taught examples must not disappear inside
+    thousands of teacher dialogues. The model still generates every token
+    itself during chat: these lessons are used ONLY as gradient targets.
+    Every tenth lesson is held out for validation and never sampled here.
+    """
+    def fetch(origin, limit):
+        return db.execute(
+            "SELECT prompt,answer FROM lessons "
+            "WHERE origin=? AND id % 10 != 0 ORDER BY id DESC LIMIT ?",
+            (origin, limit)
+        ).fetchall()
+
+    dialogue = fetch("dialogue_quality_v5", 6000)
+    teacher = fetch("teacher", 1000)
+    user = fetch("user", 2000)
+    seeds = fetch("seed", 250)
+    regular = dialogue + teacher
+
+    if not regular and not user and not seeds:
+        say("No training examples available; skipping.")
         return 0
-    validation_count=db.execute(
+    validation_count = db.execute(
         "SELECT COUNT(*) FROM lessons WHERE id % 10 = 0 "
         "AND origin IN ('seed','user','teacher','dialogue_quality_v5')"
     ).fetchone()[0]
     say(
-        f'AXON Transformer learning from {len(rows):,} dialogue + {len(seeds):,} seed/user examples; '
-        f'{validation_count:,} held-out validation examples.'
+        f"AXON training data: {len(dialogue):,} conversations, "
+        f"{len(teacher):,} teacher lessons, {len(user):,} personal lessons, "
+        f"{len(seeds):,} seed examples; "
+        f"{validation_count:,} held-out validation examples."
     )
+
+    # Typical mix with all groups present:
+    # 80% diverse conversation / 10% user's examples / 10% seed.
+    # This is *training data selection*, not response retrieval.
     def training_rows():
-        epoch=0
+        rng = random.Random(20261115)
+        index = 0
         while True:
-            pool=list(rows)+list(rows)+list(seeds)
-            random.Random(2026+epoch).shuffle(pool)
-            yield from pool
-            epoch+=1
+            phase = index % 10
+            if phase == 0 and user:
+                selected = user
+            elif phase == 1 and seeds:
+                selected = seeds
+            else:
+                selected = regular or user or seeds
+            index += 1
+            yield rng.choice(selected)
+
     return train_student(
-        db,np,training_rows(),max_steps=max(1,int(steps)),print_every=25
+        db, np, training_rows(), max_steps=max(1, int(steps)), print_every=25
     )
 
 
