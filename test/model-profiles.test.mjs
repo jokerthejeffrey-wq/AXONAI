@@ -1,3 +1,4 @@
+import {DAILY_GLOBAL_JOBS,FAIR_WORKER_JOBS_PER_DAY} from '../server/train-store.js';
 import status from '../api/status.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -20,4 +21,10 @@ test('Production remains on the old model while 50M research track is unactivate
  assert.equal(res.body.experimental_model_parameters,50_224_640);
  assert.equal(res.body.experimental_model_deployed,false);
  assert.equal(res.body.five_contributors_active,false);
+});
+
+test('Five volunteers receive individual opportunities without increasing the shared quota',()=>{
+ assert.equal(DAILY_GLOBAL_JOBS,96);
+ assert.equal(FAIR_WORKER_JOBS_PER_DAY,19);
+ assert.ok(5*FAIR_WORKER_JOBS_PER_DAY<=DAILY_GLOBAL_JOBS);
 });
