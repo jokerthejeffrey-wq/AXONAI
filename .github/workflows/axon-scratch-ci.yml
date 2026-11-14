@@ -1,7 +1,7 @@
 name: AXON scratch local chat tests
 on:
   push:
-    branches: [main, axon-scratch-local-only, fix-training-queue-mobile-nov13, conversational-training-streaming, installer-eta-dual-teacher-20261114, fix-ram-admission-compact-teacher, fix-teacher-loader-progress-20261114]
+    branches: [main, axon-scratch-local-only, fix-training-queue-mobile-nov13, conversational-training-streaming, installer-eta-dual-teacher-20261114, fix-ram-admission-compact-teacher, fix-teacher-loader-progress-20261114, axon-50m-research-track]
   workflow_dispatch:
 
 permissions:
@@ -22,5 +22,5 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: python3 -m pip install --disable-pip-version-check psutil==7.0.0
-      - run: python3 -m unittest trainer.test_corpus trainer.test_teacher trainer.test_memory -v
+      - run: python3 -m unittest trainer.test_corpus trainer.test_teacher trainer.test_memory trainer.test_expanded_model -v
       - run: python3 -m compileall -q trainer student.py
