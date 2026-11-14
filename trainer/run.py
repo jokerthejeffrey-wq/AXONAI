@@ -6,6 +6,8 @@ import requests
 from trainer.chunked_corpus import load_manifest, read_assigned
 from trainer.memory import wait, MemoryAdmissionError
 from trainer.assignments import rounds, claim_until_ready
+from trainer.lessons import source_lessons
+from trainer.progress import bar
 
 def request(session,method,url,**kwargs):
     for attempt in range(10):
@@ -53,6 +55,7 @@ def main():
     worker_file=Path(args.cache)/'worker-id'
     if not worker_file.exists():worker_file.write_text(str(uuid.uuid4()))
     worker=worker_file.read_text().strip();session=requests.Session()
+    trained_total=0
     try:
         model=Student().to(args.device)
         for n in rounds(args.rounds):
@@ -76,32 +79,32 @@ def main():
             arch=job['manifest']['architecture']
             if arch!=model.config:raise RuntimeError('Student architecture mismatch')
             rows=[]
+            used_records=0
+            source_skips=0
             for offset,raw in enumerate(read_assigned(args.cache,pages,assignment['start'],assignment['count'])):
-                print(f"Preparing record {assignment['start']+offset+1}…",flush=True)
                 wait(256)
-                from trainer.corpus import training_context
-                context, answer = training_context(raw)
-                if teacher is not None and not teacher.review_source(raw):
-                    print('  Original record failed local source-quality checks; skipped.',flush=True)
-                    continue
-                budget = 509 - sum(len(m['content'].encode()) + 2 for m in context)
-                if context and answer and budget > 24:
-                    if len(answer.encode()) > budget:
-                        answer = answer.encode()[:budget].decode('utf-8', errors='ignore').rsplit(' ', 1)[0].strip()
-                    if answer:
-                        rows.append({'concept':'conversation', 'messages':context, 'response':answer})
-                if teacher:
-                    # The global corpus reservation gives every PC different seeds.
-                    # Only bounded source-preserving variations enter student training.
+                prepared=source_lessons(raw)
+                if prepared:
+                    used_records+=1
+                    rows.extend(prepared)
+                else:
+                    source_skips+=1
+                if teacher and teacher.review_source(raw):
+                    # Optional local variation is strictly in addition to
+                    # original training examples; it cannot veto them.
                     item=teacher.generate_checked(raw,assignment['start']+offset)
-                    if item:
+                    if item and len(rows)<assignment['count']*4:
                         rows.append(item)
                         with (Path(args.cache)/'verified-generated.jsonl').open('a',encoding='utf-8') as output:
                             output.write(json.dumps({'reservation':assignment['start']+offset,
                                 'checks':'local-source-grounded','row':item},ensure_ascii=False)+'\n')
-                    else:
-                        print('  No safe variation generated for this source record.',flush=True)
-            if not rows:print('No safe short examples in this reservation; skipping without replay.');continue
+                print(bar(round(100*(offset+1)/assignment['count']),
+                          'Preparing round '+str(n+1)),flush=True)
+            print(f'Round {n+1}: {used_records}/{assignment["count"]} records usable, '
+                  f'{len(rows)} lessons prepared, {source_skips} skipped.',flush=True)
+            if not rows:
+                print('No safe short examples in this reservation; nothing submitted.',flush=True)
+                continue
             manifest=request(session,'GET',base+f"/api/checkpoint/{job['version']}").json()
             with tempfile.TemporaryDirectory() as tmp:
                 file=Path(tmp)/'student.safetensors';digest=hashlib.sha256();size=0
@@ -125,7 +128,18 @@ def main():
                 for index in range(parts):
                     request(session,'POST',base+'/api/update-part',data=data[index*chunk_size:(index+1)*chunk_size],headers={'Content-Type':'application/octet-stream','X-AXON-Job':job['id'],'X-AXON-Token':job['upload_token'],'X-AXON-Part':str(index)})
                 result=request(session,'POST',base+'/api/update',json={'job':job['id'],'token':job['upload_token'],'parts':parts,'size':len(data),'sha256':hashlib.sha256(data).hexdigest()})
-                print(f'Round {n+1}: {len(rows)} lessons trained using full backpropagation; checkpoint submitted.',flush=True)
+                trained_total+=len(rows)
+                print(f'Round {n+1} complete: {len(rows)} local optimizer steps, '
+                      f'{trained_total} total this session. Checkpoint SUBMITTED for '
+                      f'server review, not yet approved.',flush=True)
+                if n % 5==0:
+                    try:
+                        progress=request(session,'GET',base+'/api/status').json()
+                        print(f'SHARED MODEL: version {progress.get("training_version", "?")}'
+                              f' approved; {progress.get("pending_updates", "?")}'
+                              f' pending. Local lessons trained: {trained_total}.',flush=True)
+                    except Exception:
+                        print('Shared version temporarily unavailable; local training continues.',flush=True)
     finally:
         session.close()
         if teacher is not None: teacher.close()
