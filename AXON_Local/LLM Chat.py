@@ -100,6 +100,7 @@ def main():
                 print("  :observe 4 8 [topic]     Generate and learn from local teacher chats")
                 print("  :teach question => answer  Add your own labeled example")
                 print("  :notes 10                Show recent human/assistant notes")
+                print("  :learned greetings        Show greeting examples AXON actually saved")
                 print("  :temperature 0.75        Set sampling temperature (0.15-2.0)")
                 print("  :topk 32                 Set candidate-token count (2-256)")
                 print("  :length 80               Set max generated tokens (8-200)")
@@ -152,6 +153,17 @@ def main():
                     limit = 10
                 for speaker, receiver, message in core.recent_notes(db, limit):
                     print(f"{speaker} -> {receiver}: {message}")
+                continue
+
+            if lower == ":learned greetings":
+                examples = core.learned_greeting_examples(db, limit=20)
+                if not examples:
+                    print("No saved greeting lessons found. Teach some in MANUAL Chat.py first.")
+                else:
+                    print(f"AXON has {len(examples)} saved greeting examples:")
+                    for question, answer in examples:
+                        print(f"  Human > {question}")
+                        print(f"  AXON memory > {answer}")
                 continue
 
             if lower.startswith(":teach "):
@@ -223,6 +235,16 @@ def main():
 
             if prompt.startswith(":"):
                 print("Unknown command. Type :help.")
+                continue
+
+            # First consult examples the user/teacher actually saved. Neural
+            # generation alone cannot reliably recall a tiny set of taught greetings.
+            learned = core.retrieve_learned_reply(db, prompt, history=history)
+            if learned:
+                print("AXON [learned memory] > ", end="", flush=True)
+                print(learned, flush=True)
+                history.append((prompt, learned))
+                history = history[-3:]
                 continue
 
             if int(core.get_meta(db, "transformer_steps", 0)) <= 0:
