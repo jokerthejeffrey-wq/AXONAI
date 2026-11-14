@@ -156,26 +156,15 @@ def main():
         if '--install-only' not in args and '--repair' not in args:
             server = args[args.index('--server')+1] if '--server' in args and args.index('--server')+1 < len(args) else 'https://axonai-theta.vercel.app'
             preflight(server)
-        wants_teacher = '--teacher' in args and '--no-teacher' not in args
-        try:
-            python = prepare_environment(gpu, '--repair' in args, teacher=wants_teacher)
-        except RuntimeError as error:
-            if not wants_teacher or not any(
-                label in str(error) for label in
-                ('Local pretrained reviewer failed', 'Runtime verification failed')
-            ):
-                raise
-            print('Optional pretrained checker setup failed. Starting student training without it.', flush=True)
-            wants_teacher = False
-            python = prepare_environment(gpu, False, teacher=False)
+        # All volunteers now use a built-in lightweight, non-pretrained helper.
+        # Never install the optional Transformers/Hugging Face teacher packages.
+        python = prepare_environment(gpu, '--repair' in args, teacher=False)
         if '--install-only' in args:
             return 0
         entry = ROOT / 'trainer' / 'run.py'
         if not entry.exists():
             entry = entry.with_suffix('.pyc')
         options = [arg for arg in args if arg not in ('--gpu', '--repair', '--teacher-check')]
-        if not wants_teacher and '--no-teacher' not in options:
-            options.append('--no-teacher')
         return subprocess.run([str(python), '-u', str(entry), '--device', 'cuda' if gpu else 'cpu', *options]).returncode
     except KeyboardInterrupt:
         print('\nSetup stopped. Open the trainer again to resume with the cached downloads.', flush=True)

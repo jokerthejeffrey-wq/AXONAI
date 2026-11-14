@@ -15,7 +15,7 @@ def request(session,method,url,**kwargs):
 
 def main():
     p=argparse.ArgumentParser();p.add_argument('--device',choices=['cpu','cuda'],default='cpu');p.add_argument('--server',default='https://axonai-theta.vercel.app');p.add_argument('--rounds',type=int,default=100)
-    p.add_argument('--teacher', action='store_true', help='Optional local pretrained reviewer; adds download and CPU time')
+    p.add_argument('--teacher', action='store_true', help='Use built-in source-grounded local lesson helper (default)')
     p.add_argument('--cache',default=str(Path.home()/'.axonai'/'smoltalk-v1'));p.add_argument('--yes',action='store_true');p.add_argument('--no-teacher',action='store_true');args=p.parse_args()
     from urllib.parse import urlparse
     parsed=urlparse(args.server)
@@ -31,7 +31,7 @@ def main():
     except requests.RequestException as error:
         raise RuntimeError('Training preflight failed. Verify the coordinator URL and internet connection.') from error
     print('Training: unique conversational corpus and full-model weight updates.')
-    print('Pretrained review is optional; it is never mixed into student weights.', flush=True)
+    print('Local teacher is non-pretrained and requires zero model downloads.', flush=True)
     print('Downloads are cached locally. Press Ctrl+C to stop.', flush=True)
     pages=load_manifest();info=pages['corpus']
     Path(args.cache).mkdir(parents=True,exist_ok=True)
@@ -67,15 +67,15 @@ def main():
                 print(details.get(reason,'Training queue temporarily unavailable.'),flush=True)
                 break
             job=r.json();assignment=job.get('corpus')
-            if args.teacher and not args.no_teacher and not teacher_attempted:
+            if not args.no_teacher and not teacher_attempted:
                 teacher_attempted=True
                 try:
                     wait(800)
                     from trainer.teacher import Teacher
-                    print('Loading cached pretrained checker for teacher-assisted lessons.',flush=True)
+                    print('Starting built-in local source-grounded lesson helper.',flush=True)
                     teacher=Teacher('cpu')
                 except Exception as error:
-                    print('Pretrained checker unavailable ('+type(error).__name__+
+                    print('Local lesson helper unavailable ('+type(error).__name__+
                           '). Training with original dataset lessons instead.',flush=True)
                     teacher=None
             if not assignment or assignment['id']!=info['id'] or assignment['revision']!=info['revision']:raise RuntimeError('Server does not support this corpus client yet.')
@@ -88,7 +88,7 @@ def main():
                 from trainer.corpus import training_context
                 context, answer = training_context(raw)
                 if teacher is not None and not teacher.review_source(raw):
-                    print('  Original record failed two review checks; skipped.',flush=True)
+                    print('  Original record failed local source-quality checks; skipped.',flush=True)
                     continue
                 budget = 509 - sum(len(m['content'].encode()) + 2 for m in context)
                 if context and answer and budget > 24:
@@ -98,15 +98,15 @@ def main():
                         rows.append({'concept':'conversation', 'messages':context, 'response':answer})
                 if teacher:
                     # The global corpus reservation gives every PC different seeds.
-                    # Only twice-approved generated records enter student training.
+                    # Only bounded source-preserving variations enter student training.
                     item=teacher.generate_checked(raw,assignment['start']+offset)
                     if item:
                         rows.append(item)
                         with (Path(args.cache)/'verified-generated.jsonl').open('a',encoding='utf-8') as output:
                             output.write(json.dumps({'reservation':assignment['start']+offset,
-                                'checks':2,'row':item},ensure_ascii=False)+'\n')
+                                'checks':'local-source-grounded','row':item},ensure_ascii=False)+'\n')
                     else:
-                        print('  Generated candidate rejected by local review.',flush=True)
+                        print('  No safe variation generated for this source record.',flush=True)
             if not rows:print('No safe short examples in this reservation; skipping without replay.');continue
             manifest=request(session,'GET',base+f"/api/checkpoint/{job['version']}").json()
             with tempfile.TemporaryDirectory() as tmp:

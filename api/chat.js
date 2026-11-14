@@ -1,6 +1,10 @@
+// AXON AI public chat. The ONLY generator is the community-trained checkpoint.
+// No pretrained provider, browser model download, or fixed conversational answer.
 import {validateMessages} from '../server/config.js';
 import {originAllowed,parseChatBody,rateLimit,turnstileConfig,verifyTurnstile} from '../server/security.js';
-import {beginGateway,gatewayDeltas} from '../server/gateway-stream.js';
+import {getQuality} from '../server/coordinator.js';
+import {loadStudent,readableReply} from '../server/scratch-chat.js';
+import {scratchGenerate,scratchStream} from '../server/scratch-infer.js';
 
 export default async function handler(req,res){
   res.setHeader('Cache-Control','no-store');
@@ -16,35 +20,52 @@ export default async function handler(req,res){
   const limited=rateLimit(req,'generations');
   if(limited){res.setHeader('Retry-After',String(limited));return res.status(429).json({error:'Message limit reached. Try again shortly.'});}
 
-  const stream=body.stream===true;
-  const gateway=await beginGateway(messages,{stream});
-  if(!gateway){
-    // The browser uses real on-device pretrained weights when cloud access is blocked.
-    // Never return an untrained student's byte samples or a fixed greeting.
-    return res.status(503).json({code:'browser_model_required',error:'Cloud inference is unavailable; use the on-device pretrained model.'});
+  const quality=await getQuality();
+  const version=Number(quality?.version||0);
+  const ready=version>0 && quality?.tested===true && quality?.ready===true;
+  const preview=body.preview===true;
+  if(!Number.isSafeInteger(version)||version<1||(!ready&&!preview)){
+    return res.status(503).json({
+      code:'student_training',
+      error:version<1
+        ?'AXON AI has not received an approved student checkpoint yet. No pretrained model will answer instead.'
+        :'AXON AI is still training and has not passed chat evaluation. Enable experimental preview to inspect its own unverified output.',
+      version:Number.isSafeInteger(version)?version:0,mode:'learning'
+    });
   }
-  if(!stream){
+  let model;
+  try{model=await loadStudent(version);}
+  catch(error){
+    console.error('AXON student loading:',String(error?.name||'Error').slice(0,40));
+    return res.status(503).json({code:'checkpoint_unavailable',error:'AXON student checkpoint is temporarily unavailable.'});
+  }
+  const mode=ready?'student':'experimental-student';
+  if(body.stream!==true){
     try{
-      const data=await gateway.json(),reply=data?.choices?.[0]?.message?.content;
-      if(typeof reply!=='string'||!reply.trim())throw Error('Empty model reply');
-      return res.status(200).json({reply:reply.trim(),mode:'assisted',model:'Qwen3 14B (pretrained)'});
-    }catch{return res.status(502).json({code:'browser_model_required',error:'Cloud model reply failed.'});}
+      const reply=scratchGenerate(model,messages,{maxNewTokens:128,temperature:.75,topP:.9});
+      if(!reply || (ready&&!readableReply(reply)))
+        return res.status(503).json({code:'student_training',error:'AXON student could not produce a readable reply yet.'});
+      return res.status(200).json({reply,mode,version,tokenizer:'utf8-bytes-v1',verified:ready});
+    }catch(error){return res.status(503).json({code:'generation_unavailable',error:'AXON student generation failed.'});}
   }
   res.setHeader('Content-Type','application/x-ndjson; charset=utf-8');
   res.setHeader('X-Content-Type-Options','nosniff');
   res.flushHeaders?.();
-  res.write(JSON.stringify({type:'meta',mode:'assisted',model:'Qwen3 14B (pretrained)'})+'\n');
+  res.write(JSON.stringify({type:'meta',mode,model:'AXON AI scratch Transformer',version,verified:ready})+'\n');
   try{
-    let length=0;
-    for await(const part of gatewayDeltas(gateway)){
+    let output='';
+    for await(const chunk of scratchStream(model,messages,{maxNewTokens:128,temperature:.75,topP:.9})){
       if(res.destroyed)break;
-      length+=part.length;
-      if(length>8000)throw Error('Reply too long');
-      res.write(JSON.stringify({type:'delta',text:part})+'\n');
+      output+=chunk;
+      if(output.length>1024)throw Error('Model output limit');
+      res.write(JSON.stringify({type:'delta',text:chunk})+'\n');
     }
-    if(!res.destroyed)res.end(JSON.stringify({type:'done'})+'\n');
+    if(!res.destroyed){
+      if(!output.trim())res.write(JSON.stringify({type:'error',error:'Student did not produce text yet.'})+'\n');
+      res.end(JSON.stringify({type:'done'})+'\n');
+    }
   }catch(error){
-    console.warn('AXON cloud stream failed:',String(error?.name||'Error').slice(0,40));
-    if(!res.destroyed)res.end(JSON.stringify({type:'error',error:'Cloud generation interrupted. Try again.'})+'\n');
+    console.warn('AXON scratch stream interrupted:',String(error?.name||'Error').slice(0,40));
+    if(!res.destroyed)res.end(JSON.stringify({type:'error',error:'Student generation was interrupted.'})+'\n');
   }
 }

@@ -16,13 +16,13 @@ test('No provider packages or Gateway authentication required',()=>{
 test('Greeting never returns a canned or untrained model reply',async()=>{
  const res=response();await chat(req('hello'),res);
  assert.equal(res.code,503);
- assert.equal(res.body.code,'browser_model_required');
+ assert.equal(res.body.code,'student_training');
  assert.equal(res.body.reply,undefined);
 });
 test('Chat cannot accidentally stream untrained byte tokens',async()=>{
  const res=response();await chat({...req('hello'),body:{messages:[{role:'user',content:'hello'}],stream:true}},res);
  assert.equal(res.code,503);
- assert.equal(res.body.code,'browser_model_required');
+ assert.equal(res.body.code,'student_training');
 });
 test('Actual scratch checkpoint parses and generates entirely in-process',()=>{
  const checkpoint=Buffer.concat(Array.from({length:6},(_,i)=>readFileSync('public/model/v0-'+String(i).padStart(2,'0')+'.bin')));
@@ -40,6 +40,6 @@ test('Untrained checkpoint never pretends to have learned answers',async()=>{
 test('Status shows no Gateway dependency',async()=>{
  const res=response();await status({method:'GET',headers:{}},res);
  assert.equal(res.code,200);
- assert.equal(res.body.chat_mode,'pretrained-generation-with-browser-fallback');
+ assert.equal(res.body.chat_mode,'scratch-training');
  assert.equal(res.body.chat_requires_gateway,false);
 });

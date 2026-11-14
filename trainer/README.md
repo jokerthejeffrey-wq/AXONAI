@@ -10,11 +10,11 @@ The corpus release is `corpus-smoltalk-v1`, separate from the latest trainer rel
 
 ## Optional teacher
 
-By default the trainer uses the original conversational lessons immediately. Add `--teacher` to download and run the local pretrained reviewer/variant generator. This uses more disk, RAM, and time. No pretrained weights are copied into the student. The two teacher checks are not proof that an example is correct.
+By default the trainer uses the original conversational lessons immediately. All trainers use a small deterministic local lesson helper by default. It screens examples for structural problems and creates occasional source-grounded instruction variants, preserving the original answer. No model weights, Transformers, or teacher dependencies are downloaded. Add `--no-teacher` to disable this helper. It is NOT a factual oracle or a substitute for high-quality training data.
 
 ## Model and limitations
 
-The active student remains the 3.4M-parameter causal transformer. It trains all layers through backpropagation with a UTF-8 byte tokenizer. Python generation now caches attention keys/values and can yield text incrementally through `student.generate_stream`; this does not alter the separately deployed JavaScript chat engine. An 11,240,448-parameter compact research configuration and the prior 50M experiment are available for offline evaluation. Neither has been silently switched into the production checkpoint protocol.
+The active student remains the 3.4M-parameter causal transformer; changing the live checkpoint shape in place would break existing volunteers. It trains all layers through backpropagation with a UTF-8 byte tokenizer. Python generation now caches attention keys/values and can yield text incrementally through `student.generate_stream`; this does not alter the separately deployed JavaScript chat engine. An 11,240,448-parameter compact research configuration and the prior 50M experiment are available for offline evaluation. Neither has been silently switched into the production checkpoint protocol.
 
 Small transformers are real neural language models but are not guaranteed GPT-3/GPT-4 capability. More contributors help only when updates pass evaluation and the data, compute, capacity, and coordinator throughput are sufficient. Current server quotas remain in place to control storage/validation cost.
 

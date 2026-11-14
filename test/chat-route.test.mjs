@@ -6,5 +6,5 @@ test('Math requests do not receive fake canned inference',async()=>{
   const res=response();
   await chat({method:'POST',headers:{},body:{messages:[{role:'user',content:'100 - 100'}]}},res);
   assert.equal(res.code,503);
-  assert.equal(res.body.code,'browser_model_required');
+  assert.equal(res.body.code,'student_training');
 });

@@ -56,13 +56,14 @@ export function parseChatBody(req) {
   if (declared > 131072) { const err = new Error('Request is too large.'); err.status = 413; throw err; }
   const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
   if (!body || typeof body !== 'object' || Array.isArray(body) ||
-      Object.keys(body).some(k => !['messages', 'turnstileToken', 'stream'].includes(k))) throw Error('Invalid request body.');
+      Object.keys(body).some(k => !['messages', 'turnstileToken', 'stream', 'preview'].includes(k))) throw Error('Invalid request body.');
   if (Buffer.byteLength(JSON.stringify(body), 'utf8') > 131072) {
     const err = new Error('Request is too large.'); err.status = 413; throw err;
   }
   if (body.turnstileToken !== undefined &&
       (typeof body.turnstileToken !== 'string' || body.turnstileToken.length > 2048)) throw Error('Invalid verification token.');
   if(body.stream!==undefined && typeof body.stream!=='boolean')throw Error('Invalid stream option.');
+  if(body.preview!==undefined && typeof body.preview!=='boolean')throw Error('Invalid preview option.');
   return body;
 }
 
