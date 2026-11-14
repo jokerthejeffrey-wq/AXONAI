@@ -247,7 +247,193 @@ def _train_bpe(db, max_lines=2000):
     return vocab, merges
 
 
+
+class AdaptiveResources:
+    """Cooperative CPU/RAM governor with optional NVIDIA CUDA acceleration.
+
+    This is advisory scheduling, not a guarantee of system responsiveness.
+    No extra packages are required for the CPU path. psutil and CuPy are
+    detected when already installed; neither is silently downloaded.
+    """
+    def __init__(self, profile='balanced'):
+        self.profile = profile
+        self.cores = max(1, os.cpu_count() or 2)
+        self.workers = max(1, min(4, (self.cores - 1) // 2 or 1))
+        self.cpu_percent = None
+        self.ram_available = None
+        self.ram_total = None
+        self.last_sample = 0.0
+        self.last_report = 0.0
+        self._prev_times = None
+        self.psutil = None
+        try:
+            import psutil
+            self.psutil = psutil
+            psutil.cpu_percent(interval=None)
+        except ImportError:
+            pass
+        self._reduce_process_priority()
+        # Restrict existing OpenBLAS/MKL pools if threadpoolctl is available;
+        # environment variables alone only apply before NumPy is imported.
+        try:
+            from threadpoolctl import threadpool_limits
+            self._thread_limiter = threadpool_limits(limits=self.workers)
+        except ImportError:
+            self._thread_limiter = None
+        self.sample(force=True)
+
+    def _reduce_process_priority(self):
+        try:
+            if os.name == 'nt':
+                handle = ctypes.windll.kernel32.GetCurrentProcess()
+                ctypes.windll.kernel32.SetPriorityClass(handle, 0x00004000)
+            elif hasattr(os, 'nice'):
+                os.nice(8)
+        except (AttributeError, OSError, ValueError):
+            pass
+
+    def _windows_system_load(self):
+        class FILETIME(ctypes.Structure):
+            _fields_ = [('low', ctypes.c_uint32), ('high', ctypes.c_uint32)]
+            def integer(self):
+                return (int(self.high) << 32) | int(self.low)
+
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ('length', ctypes.c_uint32), ('memory_load', ctypes.c_uint32),
+                ('total_phys', ctypes.c_uint64), ('avail_phys', ctypes.c_uint64),
+                ('total_page', ctypes.c_uint64), ('avail_page', ctypes.c_uint64),
+                ('total_virtual', ctypes.c_uint64), ('avail_virtual', ctypes.c_uint64),
+                ('avail_extended', ctypes.c_uint64),
+            ]
+        kernel = ctypes.windll.kernel32
+        idle, system, user = FILETIME(), FILETIME(), FILETIME()
+        if kernel.GetSystemTimes(ctypes.byref(idle), ctypes.byref(system),
+                                 ctypes.byref(user)):
+            times = (idle.integer(), system.integer() + user.integer())
+            if self._prev_times is not None:
+                delta_idle = times[0] - self._prev_times[0]
+                delta_total = times[1] - self._prev_times[1]
+                if delta_total > 0:
+                    self.cpu_percent = max(
+                        0.0, min(100.0, 100.0 * (1.0 - delta_idle / delta_total))
+                    )
+            self._prev_times = times
+        memory = MEMORYSTATUSEX()
+        memory.length = ctypes.sizeof(memory)
+        if kernel.GlobalMemoryStatusEx(ctypes.byref(memory)):
+            self.ram_total = int(memory.total_phys)
+            self.ram_available = int(memory.avail_phys)
+
+    def sample(self, force=False):
+        now = time.monotonic()
+        if not force and now - self.last_sample < 4.0:
+            return
+        self.last_sample = now
+        try:
+            if self.psutil:
+                self.cpu_percent = float(self.psutil.cpu_percent(interval=None))
+                memory = self.psutil.virtual_memory()
+                self.ram_available = int(memory.available)
+                self.ram_total = int(memory.total)
+            elif os.name == 'nt':
+                self._windows_system_load()
+            else:
+                if hasattr(os, 'getloadavg'):
+                    self.cpu_percent = max(0.0, min(
+                        100.0, 100.0 * os.getloadavg()[0] / self.cores
+                    ))
+                if os.path.isfile('/proc/meminfo'):
+                    values = {}
+                    with open('/proc/meminfo', encoding='utf-8') as f:
+                        for line in f:
+                            bits = line.split(':', 1)
+                            if len(bits) == 2:
+                                values[bits[0]] = int(bits[1].strip().split()[0]) * 1024
+                    self.ram_total = values.get('MemTotal')
+                    self.ram_available = values.get('MemAvailable')
+        except (OSError, ValueError, AttributeError):
+            pass
+
+    def available_for_training(self):
+        self.sample()
+        if self.ram_available is None:
+            return True
+        reserve = max(768 * 1024**2, int((self.ram_total or 0) * 0.10))
+        return self.ram_available > reserve
+
+    def throttle(self):
+        """Yield more CPU time when the user's other programs need it."""
+        self.sample()
+        while not self.available_for_training():
+            if time.monotonic() - self.last_report > 20:
+                say('Training paused: reserving RAM for other applications...')
+                self.last_report = time.monotonic()
+            time.sleep(1.0)
+            self.sample(force=True)
+        usage = self.cpu_percent
+        if usage is not None:
+            if usage >= 92.0:
+                time.sleep(0.65)
+            elif usage >= 78.0:
+                time.sleep(0.23)
+            elif usage >= 62.0:
+                time.sleep(0.08)
+        elif self.profile == 'quiet':
+            time.sleep(0.12)
+
+    def describe(self):
+        self.sample(force=True)
+        cpu = '?' if self.cpu_percent is None else f'{self.cpu_percent:.0f}%'
+        free = '?' if self.ram_available is None else f'{self.ram_available / 1024**3:.1f} GiB'
+        return f'CPU system usage {cpu} | free RAM {free} | BLAS threads {self.workers}'
+
+    def choose_backend(self, requested='auto'):
+        """Use CuPy only if installed, CUDA VRAM is free, and GPU is not busy."""
+        if requested == 'cpu':
+            return None
+        try:
+            import cupy as cp
+            if cp.cuda.runtime.getDeviceCount() < 1:
+                raise RuntimeError('no CUDA device')
+            free_vram, _ = cp.cuda.runtime.memGetInfo()
+            if free_vram < 1536 * 1024**2:
+                raise RuntimeError('less than 1.5 GiB free CUDA VRAM')
+            # Avoid competing with foreground graphics/apps.
+            if shutil.which('nvidia-smi'):
+                query = subprocess.run(
+                    ['nvidia-smi', '--query-gpu=utilization.gpu',
+                     '--format=csv,noheader,nounits'],
+                    text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    timeout=3, check=False
+                )
+                if query.returncode == 0:
+                    use = int(query.stdout.strip().splitlines()[0].strip())
+                    if use >= 55:
+                        raise RuntimeError(f'GPU already {use}% busy')
+            cp.asarray([1.0], dtype=cp.float32)
+            return cp
+        except (ImportError, RuntimeError, ValueError, OSError,
+                subprocess.TimeoutExpired) as exc:
+            if requested == 'gpu':
+                say(f'CUDA unavailable or busy ({exc}); safely using NumPy CPU.')
+            return None
+
+
+def _limit_numpy_threads():
+    """Keep CPU cores free for Windows and other foreground applications."""
+    cores = max(1, os.cpu_count() or 2)
+    limit = max(1, min(4, (cores - 1) // 2 or 1))
+    for key in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
+        try:
+            existing = int(os.environ.get(key, limit))
+        except ValueError:
+            existing = limit
+        os.environ[key] = str(max(1, min(existing, limit)))
+
+
 def ensure_numpy():
+    _limit_numpy_threads()
     try:
         import numpy as np
         return np
