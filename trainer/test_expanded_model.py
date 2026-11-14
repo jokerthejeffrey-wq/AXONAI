@@ -31,6 +31,15 @@ class TorchExpandedTests(unittest.TestCase):
         from trainer.expanded_model import expand_legacy
         model=expand_legacy(Student(),target=COMPACT_CONFIG)
         self.assertEqual(sum(p.numel() for p in model.parameters()),11_240_448)
+        import tempfile
+        from pathlib import Path
+        from safetensors.torch import save_file
+        from student import snapshot
+        from trainer.eval_50m import checkpoint_profile
+        with tempfile.TemporaryDirectory() as folder:
+            file=Path(folder)/'compact.safetensors'
+            save_file(snapshot(model),str(file))
+            self.assertEqual(checkpoint_profile(file),COMPACT_CONFIG)
         before=model.blocks[0].qkv.weight.detach().clone()
         train(model,[dict(concept='test',messages=[dict(role='user',content='Hi')],response='Hello')],'cpu')
         self.assertFalse(self.torch.equal(before,model.blocks[0].qkv.weight))

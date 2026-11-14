@@ -11,7 +11,7 @@ from pathlib import Path
 import torch
 from safetensors import safe_open
 
-from settings import CONFIG, LARGE_CONFIG
+from settings import TRAINING_PROFILES
 from student import Student, evaluate, load_weights
 
 
@@ -19,10 +19,9 @@ def checkpoint_profile(path):
     with safe_open(str(path), framework='pt', device='cpu') as reader:
         w=list(reader.get_tensor('token.weight').shape)
         positions=list(reader.get_tensor('position.weight').shape)
-        if w==[CONFIG['vocab_size'],CONFIG['width']] and positions==[CONFIG['context'],CONFIG['width']]:
-            return dict(CONFIG)
-        if w==[LARGE_CONFIG['vocab_size'],LARGE_CONFIG['width']] and positions==[LARGE_CONFIG['context'],LARGE_CONFIG['width']]:
-            return dict(LARGE_CONFIG)
+        for config in TRAINING_PROFILES.values():
+            if w==[config['vocab_size'],config['width']] and positions==[config['context'],config['width']]:
+                return dict(config)
     raise ValueError('Unsupported AXON checkpoint; no generation attempted')
 
 

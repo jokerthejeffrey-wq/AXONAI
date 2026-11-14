@@ -98,10 +98,10 @@ def create_checkpoint(legacy_path, output, seed=50224, profile="axon50m"):
 
 
 def main(argv=None):
-    p=argparse.ArgumentParser(description='Create an isolated 50M AXON checkpoint')
+    p=argparse.ArgumentParser(description='Create an isolated compact or 50M AXON checkpoint')
     p.add_argument('--from-legacy', type=Path, required=True,
                    help='existing verified small AXON .safetensors checkpoint')
-    p.add_argument('--out', type=Path, default=Path.home()/'.axonai'/'50m'/'research.safetensors')
+    p.add_argument('--out', type=Path, default=Path.home()/'.axonai'/'research'/'expanded.safetensors')
     p.add_argument('--profile', choices=['axon11m','axon50m'], default='axon11m')
     p.add_argument('--seed', type=int, default=50224)
     args=p.parse_args(argv)
