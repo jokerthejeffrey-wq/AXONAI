@@ -1830,8 +1830,4 @@ if __name__=='__main__':
     except KeyboardInterrupt:say('\nStopped. Notes and last student checkpoint saved.')
     except Exception as exc:
         say('Training error: '+str(exc))
-        raise, '#'):
-        return text
-    if not previous:
-        return text[0].upper() + text[1:]
-    return (' ' if has_space else '') + text
+        raise
