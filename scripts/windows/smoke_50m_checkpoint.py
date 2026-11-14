@@ -4,11 +4,11 @@ import tempfile
 from pathlib import Path
 import sys
 
+root=Path(__file__).resolve().parents[2]
+sys.path.insert(0,str(root))
 from safetensors import safe_open
 from trainer.expanded_model import create_checkpoint
 from settings import LARGE_CONFIG, parameter_count
-
-root=Path(__file__).resolve().parents[2]
 paths=sorted((root/'public/model').glob('v0-*.bin'))
 if len(paths)!=6:raise SystemExit('Expected six signed legacy model parts')
 base=b''.join(p.read_bytes() for p in paths)
