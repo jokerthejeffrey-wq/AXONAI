@@ -853,7 +853,7 @@ def _trf_shapes():
     return shapes
 
 
-_transformer_initialize_shapes = _trf_shapes()
+_trf_initialize_shapes = _trf_shapes()
 
 
 def transformer_forward(np, params, token_ids):
