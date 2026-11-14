@@ -70,7 +70,7 @@ class DeliberateDecoder:
             nan=-1e8, posinf=1e6, neginf=-1e8
         )
 
-    def options(self, raw_scores, generated, limit=12):
+    def options(self, raw_scores, generated, limit=12, pattern_prefix=None):
         """Rank candidate words using neural and learned word-order probabilities."""
         np = self.np
         scores = raw_scores.copy()
@@ -110,8 +110,11 @@ class DeliberateDecoder:
 
         neural_count = min(len(self.vocab), max(24, 6 * self.beam))
         pool = set(int(x) for x in np.argpartition(scores, -neural_count)[-neural_count:])
+        # The learned word-order model is conditioned on the current question.
+        # This avoids selecting every answer's first word from one global pool.
+        pattern_tokens = list(pattern_prefix or []) + [self.vocab[i] for i in generated]
         patterns = core.word_pattern_probabilities(
-            self.db, [self.vocab[i] for i in generated], self.lookup
+            self.db, pattern_tokens, self.lookup
         )
         patterns = [(int(idx), int(count)) for idx, count in patterns if idx < len(self.vocab)]
         pool.update(idx for idx, _ in patterns[:50])
@@ -160,10 +163,10 @@ class DeliberateDecoder:
         order = np.argsort(-probs)[:max(1, int(limit))]
         return [(int(ids[k]), float(probs[k])) for k in order if probs[k] > 0]
 
-    def choose(self, prefix, generated):
+    def choose(self, prefix, generated, pattern_prefix):
         """Look ahead, choose the first token of the best short continuation."""
         base_logits = self.scores_for([prefix])[0]
-        first = self.options(base_logits, generated, limit=self.beam)
+        first = self.options(base_logits, generated, limit=self.beam, pattern_prefix=pattern_prefix)
         if not first:
             return 2, []
 
@@ -180,7 +183,8 @@ class DeliberateDecoder:
                     idx = first[i][0]
                     second[i] = self.options(
                         future_logits[k], generated + [idx],
-                        limit=2 if self.depth >= 3 else 1
+                        limit=2 if self.depth >= 3 else 1,
+                        pattern_prefix=pattern_prefix
                     )
                 if self.depth == 2:
                     for i, choices in second.items():
@@ -209,7 +213,7 @@ class DeliberateDecoder:
                             third = self.options(
                                 third_logits[row],
                                 generated + [first[i][0], next_idx],
-                                limit=1
+                                limit=1, pattern_prefix=pattern_prefix
                             )
                             if third:
                                 future = (
@@ -240,17 +244,13 @@ class DeliberateDecoder:
         return first[winner][0], alternatives
 
     def generate(self, question, history=None, length=72, show_choices=False):
-        query = question
-        # Include only a brief recent exchange; current user text stays at the end.
-        if history:
-            prev_user, prev_ax = history[-1]
-            query = (
-                "Previous user: " + prev_user[-160:] +
-                " Previous AXON: " + prev_ax[-200:] +
-                " Current user: " + question
-            )
+        # This student was trained on single-turn question -> answer examples.
+        # Do not append untrained prose labels such as "Previous user:" that
+        # dilute the actual question in its fixed-size context window.
+        question_tokens = core.tokenizer(question)
+        pattern_prefix = ['<user>'] + question_tokens[-120:] + ['<assistant>']
         prefix = [3] + [
-            self.lookup.get(w, 1) for w in core.tokenizer(query)
+            self.lookup.get(w, 1) for w in question_tokens
         ][-110:] + [4]
         generated = []
         pieces = []
@@ -258,7 +258,7 @@ class DeliberateDecoder:
         previous = ""
         try:
             for step in range(max(1, min(200, int(length)))):
-                selected, alternatives = self.choose(prefix, generated)
+                selected, alternatives = self.choose(prefix, generated, pattern_prefix)
                 if selected == 2:
                     break
                 token = self.vocab[selected]
@@ -466,7 +466,7 @@ def main():
                     continue
                 question, answer = (part.strip() for part in pair)
                 core.store_lesson(db, question, answer, "user")
-                core.observe_word_patterns(db, answer)
+                core.observe_word_patterns(db, answer, prefix=question)
                 core.extend_vocabulary(db, question + " " + answer)
                 db.commit()
                 print("Training student weights on your example...")
