@@ -13,5 +13,7 @@ test('Blob cleanup retains in-flight and four recent checkpoints',()=>{
 test('Submission status is authenticated and never returns upload tokens',()=>{
  const src=fs.readFileSync('api/job-state.js','utf8');
  assert.match(src,/submissionState/);
- assert.doesNotMatch(src,/return.*token/);
+ assert.doesNotMatch(src,/upload_token/);
+ const store=fs.readFileSync('server/train-store.js','utf8');
+ assert.match(store,/return \{status:job.status,sha256:job.sha256\|\|null,size:/);
 });
