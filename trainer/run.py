@@ -45,7 +45,16 @@ def main():
         for n in range(args.rounds):
             wait(512)
             r=request(session,'POST',base+'/api/job',json={'worker':worker,'corpus':info})
-            if r.status_code==204:print('Queue/quota or unique corpus range exhausted; stopping.');break
+            if r.status_code==204:
+                reason=r.headers.get('X-AXON-Queue','review-pending')
+                details={
+                    'worker-daily-limit':'Daily training share complete.',
+                    'daily-capacity-reached':'Training capacity filled for today.',
+                    'corpus-complete':'All available unique examples assigned.',
+                    'review-pending':'Submitted models are awaiting review.',
+                }
+                print(details.get(reason,'Training queue temporarily unavailable.'),flush=True)
+                break
             job=r.json();assignment=job.get('corpus')
             if not assignment or assignment['id']!=info['id'] or assignment['revision']!=info['revision']:raise RuntimeError('Server does not support this corpus client yet.')
             arch=job['manifest']['architecture']
