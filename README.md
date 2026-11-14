@@ -1,5 +1,8 @@
 # AXON AI
 
+**50M experimental model:** The repository contains an isolated, tested 50,224,640-parameter research architecture and legacy checkpoint converter in [docs/50m-research.md](docs/50m-research.md). The current Vercel chat and training workers still use the proven legacy checkpoint format until large-checkpoint storage, aggregation and inference are verified; five volunteer PCs cannot guarantee natural conversation within days.
+
+
 AXON AI is an independently trained experimental transformer. The website, model-inference API, and training coordination API run on Vercel. Training checkpoints and progress are stored in Vercel Blob and Neon Postgres. The website does **not** need Vercel AI Gateway.
 
 ## Windows CPU and GPU trainers
