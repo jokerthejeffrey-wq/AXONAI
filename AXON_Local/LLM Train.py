@@ -780,6 +780,8 @@ def save_transformer(db, np, params, moment1, moment2, step):
         ('trf_p_', params), ('trf_m_', moment1), ('trf_v_', moment2)
     ):
         for name, array in collection.items():
+            if name.startswith('_'):
+                continue
             payload = zlib.compress(np.asarray(array, dtype='<f4').tobytes(), 1)
             db.execute(
                 'INSERT OR REPLACE INTO weights(key,value) VALUES(?,?)',
@@ -1613,22 +1615,38 @@ def agent_dialogue(db, teacher, turns=8, topic=None, display=True):
 
 
 def learn_observations(db,np,steps=250,epochs=25):
-    """Replay teacher conversations to AXON as next-token gradient targets."""
-    rows=db.execute("SELECT prompt,answer FROM lessons WHERE origin='dialogue_quality_v5' ORDER BY id DESC LIMIT 3000").fetchall()
-    seeds=db.execute("SELECT prompt,answer FROM lessons WHERE origin IN ('seed','user','teacher') ORDER BY id DESC LIMIT 1500").fetchall()
+    """Train on 90% of lessons; reserve every tenth lesson for held-out validation."""
+    rows=db.execute(
+        "SELECT prompt,answer FROM lessons "
+        "WHERE origin='dialogue_quality_v5' AND id % 10 != 0 "
+        "ORDER BY id DESC LIMIT 3000"
+    ).fetchall()
+    seeds=db.execute(
+        "SELECT prompt,answer FROM lessons "
+        "WHERE origin IN ('seed','user','teacher') AND id % 10 != 0 "
+        "ORDER BY id DESC LIMIT 1500"
+    ).fetchall()
     if not rows and not seeds:
-        say('No observations to train; skipping.')
+        say('No training examples available; skipping.')
         return 0
-    say(f'AXON learning from {len(rows):,} observed turns + {len(seeds):,} seed/user examples...')
-    # Favor real conversations, while keeping common greetings learned.
+    validation_count=db.execute(
+        "SELECT COUNT(*) FROM lessons WHERE id % 10 = 0 "
+        "AND origin IN ('seed','user','teacher','dialogue_quality_v5')"
+    ).fetchone()[0]
+    say(
+        f'AXON Transformer learning from {len(rows):,} dialogue + {len(seeds):,} seed/user examples; '
+        f'{validation_count:,} held-out validation examples.'
+    )
     def training_rows():
         epoch=0
-        while True:   # train for exactly the requested number of gradient steps
+        while True:
             pool=list(rows)+list(rows)+list(seeds)
             random.Random(2026+epoch).shuffle(pool)
             yield from pool
             epoch+=1
-    return train_student(db,np,training_rows(),max_steps=max(1,int(steps)),print_every=25)
+    return train_student(
+        db,np,training_rows(),max_steps=max(1,int(steps)),print_every=25
+    )
 
 
 def main():
