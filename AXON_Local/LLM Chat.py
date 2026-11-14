@@ -40,7 +40,7 @@ class WordPacedPrinter:
         self.pending += piece
         # Buffer BPE fragments until the following word boundary.
         while True:
-            match = re.search(r"\\s+", self.pending)
+            match = re.search(r"\s+", self.pending)
             if match is None:
                 break
             end = match.end()
