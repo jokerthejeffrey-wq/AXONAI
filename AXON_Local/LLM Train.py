@@ -665,8 +665,8 @@ def build_vocabulary(db, max_lines=2000):
         db.execute("DELETE FROM weights WHERE key IN ('emb_in','emb_out')")
         db.execute(
             "DELETE FROM meta WHERE key IN "
-            "('vocab_json','student_steps','bpe_merges_json','tokenizer_version',
-             'transformer_steps','transformer_version','transformer_config','transformer_validation_loss')"
+            "('vocab_json','student_steps','bpe_merges_json','tokenizer_version',"
+            "'transformer_steps','transformer_version','transformer_config','transformer_validation_loss')"
         )
         set_meta(db, 'student_arch', STUDENT_ARCH)
         db.commit()
