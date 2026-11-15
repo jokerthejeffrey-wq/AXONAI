@@ -5,7 +5,6 @@ import importlib.util
 from pathlib import Path
 import re
 import sys
-import time
 
 ROOT = Path(__file__).resolve().parent
 TRAINER = ROOT / "LLM Train.py"
@@ -18,27 +17,24 @@ sys.modules[spec.name] = core
 spec.loader.exec_module(core)
 
 
-class WordPacedPrinter:
-    """Render whole words with >=0.5s between starts; BPE pieces are not words."""
-    def __init__(self, minimum_seconds=0.5):
-        self.minimum_seconds = max(0.5, float(minimum_seconds))
-        self.started_at = time.monotonic()
-        self.last_word_at = None
+class WordStreamPrinter:
+    """Stream complete words as soon as they are decoded from BPE tokens.
+
+    No fake minimum 0.5-second delay: neural inference is the actual work.
+    Text is buffered only until a word boundary so partial subwords do not
+    appear as broken fragments on the console.
+    """
+    def __init__(self):
         self.pending = ""
+        self.words_displayed = 0
 
     def _print_part(self, part):
-        if part.strip():
-            earliest = (self.last_word_at if self.last_word_at is not None
-                        else self.started_at) + self.minimum_seconds
-            remaining = earliest - time.monotonic()
-            if remaining > 0:
-                time.sleep(remaining)
-            self.last_word_at = time.monotonic()
-        print(part, end="", flush=True)
+        if part:
+            self.words_displayed += int(bool(part.strip()))
+            print(part, end="", flush=True)
 
     def on_piece(self, piece):
         self.pending += piece
-        # Buffer BPE fragments until the following word boundary.
         while True:
             match = re.search(r"\s+", self.pending)
             if match is None:
@@ -53,6 +49,9 @@ class WordPacedPrinter:
             self.pending = ""
 
 
+CHAT_MAX_NEW_TOKENS = 160
+
+
 def show_stats(db, vocab):
     step = int(core.get_meta(db, "transformer_steps", 0))
     validation = core.get_meta(db, "transformer_validation_loss", "not measured")
@@ -64,14 +63,12 @@ def show_stats(db, vocab):
         f"{core.TRANSFORMER_HEADS} heads | width {core.TRANSFORMER_DIM} | "
         f"FFN {core.TRANSFORMER_FF}"
     )
-    print(f"Context: {core.TRANSFORMER_CONTEXT} BPE tokens | output budget {core.MAX_GENERATION_TOKENS}")
+    print(f"Context: {core.TRANSFORMER_CONTEXT} BPE tokens | chat output budget {CHAT_MAX_NEW_TOKENS}")
     print(f"Tokenizer: {len(vocab):,} tokens | {merges:,} learned BPE merges")
     print(f"Training batches: {step:,} | validation loss: {validation}")
     print(f"BRAIN.db: {core.DB_PATH.stat().st_size / 1_000_000_000:.2f} GB / {core.MAX_DB_BYTES / 1_000_000_000:.2f} GB")
-    print(
-        f"Neural lookahead: {core.GENERATION_LOOKAHEAD_BRANCHES} branches, "
-        f"one speculative token each; minimum word-display interval 0.5 seconds."
-    )
+    print("Neural generation: 2 or 3 full-context passes per token (select :think 2 or :think 3).")
+    print("Text streams per complete word with no artificial waiting.")
     print("No answer retrieval; CUDA if installed and free, otherwise adaptive NumPy CPU training.")
 
 
@@ -84,15 +81,17 @@ def main():
     )
     print("Every response is generated token by token by AXON itself.")
     print(
-        f"Deliberate search: {core.GENERATION_LOOKAHEAD_BRANCHES} neural branches "
-        f"per token; at least 0.5 seconds between displayed words."
+        "AXON checks each next-token choice twice by default; :think 3 "
+        "adds a third continuation pass."
     )
+    print("Words stream immediately when decoded; no artificial delays.")
     print("Type :help for commands.")
 
     with core.connection() as db:
         core.bootstrap_lessons(db)
         vocab = core.build_vocabulary(db)
         history = []
+        think_passes = 2
         trained_steps = int(core.get_meta(db, "transformer_steps", 0))
         if trained_steps:
             print(f"Loaded AXON checkpoint ({trained_steps:,} training batches).")
@@ -127,9 +126,18 @@ def main():
                 print("  :teach question => answer   Train AXON on your example")
                 print("  :train 1200                 Train on saved examples")
                 print("  :stats                      Show model and training details")
+                print("  :think 2                    Two neural passes per next token (faster)")
+                print("  :think 3                    Three neural passes per next token (slower)")
                 print("  :new                        Clear the current conversation context")
                 print("  :exit                       Quit")
-                print("Generation is fixed to AXON's maximum configured context/output budget.")
+                print(f"Current think passes: {think_passes}; streaming whole words without delay.")
+                continue
+            if lower == ":think":
+                print(f"Current AXON think passes: {think_passes}. Use :think 2 or :think 3.")
+                continue
+            if lower in (":think 2", ":think 3"):
+                think_passes = int(lower.split()[1])
+                print(f"AXON will evaluate every next-token choice {think_passes} times.")
                 continue
             if lower == ":stats":
                 vocab = core.build_vocabulary(db)
@@ -181,18 +189,19 @@ def main():
                 continue
 
             print("AXON > ", end="", flush=True)
-            paced = WordPacedPrinter(minimum_seconds=0.5)
+            streamed = WordStreamPrinter()
             try:
                 answer = core.transformer_generate(
                     db, prompt,
-                    length=core.MAX_GENERATION_TOKENS,
+                    length=CHAT_MAX_NEW_TOKENS,
                     temperature=core.GENERATION_TEMPERATURE,
                     top_k=core.GENERATION_TOP_K,
                     top_p=core.GENERATION_TOP_P,
-                    on_piece=paced.on_piece,
-                    history=history
+                    on_piece=streamed.on_piece,
+                    history=history,
+                    think_passes=think_passes
                 )
-                paced.finish()
+                streamed.finish()
                 if not answer.strip():
                     print("[AXON generated no tokens. Train it on more text.]")
                 else:
