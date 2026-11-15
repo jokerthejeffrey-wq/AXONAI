@@ -736,7 +736,8 @@ MAX_GENERATION_TOKENS = 512
 GENERATION_TEMPERATURE = 0.72
 GENERATION_TOP_K = 64
 GENERATION_TOP_P = 0.95
-GENERATION_LOOKAHEAD_BRANCHES = 4
+GENERATION_LOOKAHEAD_BRANCHES = 2
+GENERATION_THINK_PASSES = 2  # Full-context prediction plus one lookahead by default.
 GENERATION_LOOKAHEAD_WEIGHT = 0.30
 TRANSFORMER_VERSION = 'axon-causal-transformer-v2-bpe'
 TRANSFORMER_CONFIG = {
@@ -1573,6 +1574,57 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
     return batch_count
 
 
+_AXON_INFERENCE_CACHE = None
+
+
+def load_inference_transformer(db, np, vocab):
+    """Reuse AXON's neural weights between chat turns without loading Adam state.
+
+    Chat never needs the first/second-moment optimizer tensors. Decompressing
+    all three states on every message used to delay the first generated word.
+    The cache automatically refreshes after :teach or :train changes the
+    checkpoint step, and remains independent of saved-answer retrieval.
+    """
+    global _AXON_INFERENCE_CACHE
+    signature = (
+        str(DB_PATH.resolve()),
+        get_meta(db, 'transformer_version'),
+        get_meta(db, 'transformer_steps'),
+    )
+    if (_AXON_INFERENCE_CACHE is not None and
+            _AXON_INFERENCE_CACHE[0] == signature):
+        params = _AXON_INFERENCE_CACHE[1]
+        params['_active_vocab'] = len(vocab)
+        return params
+
+    if signature[1] != TRANSFORMER_VERSION:
+        params, _, _, _ = load_transformer(db, np, vocab)
+    else:
+        params = {}
+        shapes = _trf_shapes()
+        for name in _trf_parameter_names():
+            row = db.execute(
+                'SELECT value FROM weights WHERE key=?', ('trf_p_' + name,)
+            ).fetchone()
+            if not row:
+                raise RuntimeError(
+                    f'Missing AXON Transformer weight: {name}. '
+                    'Run LLM Train.py to repair the checkpoint.'
+                )
+            params[name] = np.frombuffer(
+                zlib.decompress(row[0]), dtype='<f4'
+            ).copy().reshape(shapes[name])
+
+    params['_active_vocab'] = len(vocab)
+    signature = (
+        str(DB_PATH.resolve()),
+        get_meta(db, 'transformer_version'),
+        get_meta(db, 'transformer_steps'),
+    )
+    _AXON_INFERENCE_CACHE = (signature, params)
+    return params
+
+
 def _format_piece(token, previous):
     """Convert one BPE token to a streaming text fragment."""
     has_space = token.startswith('▁')
@@ -1590,15 +1642,24 @@ def _format_piece(token, previous):
 
 def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
                          temperature=GENERATION_TEMPERATURE, top_k=GENERATION_TOP_K,
-                         top_p=GENERATION_TOP_P, on_piece=None, history=None):
-    """Generate every reply with AXON's own causal Transformer, one BPE token at a time."""
+                         top_p=GENERATION_TOP_P, on_piece=None, history=None,
+                         think_passes=GENERATION_THINK_PASSES):
+    """Generate AXON-only tokens; 2 or 3 context-aware passes per token.
+
+    Pass one conditions on the full latest input and conversation history.
+    Pass two checks plausible next-token continuations; the optional third
+    pass evaluates their following continuations. This is not genuine human
+    chain-of-thought or a guarantee of correctness.
+    """
     np = ensure_numpy()
     vocab = build_vocabulary(db)
     vocab = extend_vocabulary(db, prompt)
     if int(get_meta(db, 'transformer_steps', 0)) <= 0:
         return '[AXON Transformer has not been trained yet. Run LLM Train.py first.]'
-    params, _, _, _ = load_transformer(db, np, vocab)
-    params['_active_vocab'] = len(vocab)
+    params = load_inference_transformer(db, np, vocab)
+    think_passes = int(think_passes)
+    if think_passes not in (2, 3):
+        raise ValueError('think_passes must be 2 or 3')
     lookup = {token: index for index, token in enumerate(vocab)}
 
     # Recent turns are prompt context only; no saved answer is retrieved.
