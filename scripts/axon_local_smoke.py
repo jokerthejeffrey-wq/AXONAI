@@ -64,6 +64,9 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert len(vocab) > len(core.SPECIAL)
         tokens = core.tokenizer("An unseen Turkish word: nasılsın?")
         assert tokens and all(token in set(vocab) for token in tokens)
+        assert core._format_piece('▁', 'hello') == ' '
+        assert core._format_piece('▁friend', 'hello') == ' friend'
+        assert core.TRANSFORMER_LABEL_SMOOTHING == 0.05
 
         # Verify that the actual neural optimizer reduces next-token error,
         # not merely that it generates random tokens without crashing.
@@ -83,6 +86,33 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert trained == 8
         assert after < before, "AXON optimizer failed to reduce next-token error"
         assert int(core.get_meta(db, "transformer_steps", 0)) >= 8
+        assert core.best_checkpoint_available(db), (
+            "AXON did not save a recoverable best neural checkpoint"
+        )
+        best_step = int(core.get_meta(db, 'transformer_best_step'))
+        best_loss = float(core.get_meta(db, 'transformer_best_validation_loss'))
+        assert best_step in (0, 8)
+        assert np.isfinite(best_loss)
+        current_step = int(core.get_meta(db, 'transformer_steps'))
+        core.set_meta(
+            db, 'transformer_validation_loss', f'{best_loss + 1.5:.6f}'
+        )
+        db.commit()
+        assert core.inference_uses_best_checkpoint(db), (
+            "Chat failed to prefer the better-validation neural weights"
+        )
+        loaded_best = core.load_inference_transformer(db, np, vocab)
+        import zlib
+        expected = np.frombuffer(
+            zlib.decompress(
+                db.execute(
+                    "SELECT value FROM weights WHERE key='trf_best_p_tok_emb'"
+                ).fetchone()[0]
+            ), dtype='<f4'
+        ).reshape(core.VOCAB_SIZE, core.TRANSFORMER_DIM)
+        assert np.array_equal(loaded_best['tok_emb'], expected)
+        assert int(core.get_meta(db, 'transformer_steps')) == current_step
+        print('Best-checkpoint snapshot, preservation and inference selection: PASS')
 
         # Confirm unbounded training passes a None step cap through to the
         # real Transformer loop without actually running indefinitely in CI.
@@ -228,4 +258,4 @@ assert ':think 2' in CHAT and ':think 3' in CHAT
 assert "Teacher(" not in MANUAL
 assert "reviewer_model" in inspect.signature(core._chat_worker).parameters
 assert "reviewer_model" in inspect.signature(core.agent_dialogues_parallel).parameters
-print("PASS: baseline 1-pass, opt-in 2/3, no history mismatch, contractions, fast streaming.")
+print("PASS: best model snapshot, early-stop safeguards, smoothing, word spacing and neural streaming.")
