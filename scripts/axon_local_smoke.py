@@ -129,49 +129,75 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert simulated == 2, "Alternative array backend path failed"
         print("Simulated GPU-backend training, optimizer and checkpoint: PASS")
 
-        pieces = []
+        # Each autoregressive generation decision must make exactly two or
+        # three Transformer forward passes over the full message context.
         original_forward = core.transformer_forward
-        forward_calls = [0]
-        def count_forward(*args, **kwargs):
-            forward_calls[0] += 1
-            return original_forward(*args, **kwargs)
-        core.transformer_forward = count_forward
-        try:
-            answer = core.transformer_generate(
-                db, "hi", length=8, temperature=0.72, top_k=32, top_p=0.95,
-                on_piece=pieces.append,
+        passes_checked = {}
+        for passes in (2, 3):
+            pieces = []
+            forward_calls = [0]
+            def count_forward(*args, **kwargs):
+                forward_calls[0] += 1
+                return original_forward(*args, **kwargs)
+            core.transformer_forward = count_forward
+            try:
+                answer = core.transformer_generate(
+                    db, "hi", length=8, temperature=0.72,
+                    top_k=32, top_p=0.95, on_piece=pieces.append,
+                    think_passes=passes,
+                )
+            finally:
+                core.transformer_forward = original_forward
+            assert isinstance(answer, str)
+            assert pieces, "AXON did not stream any generated tokens"
+            assert forward_calls[0] >= passes
+            assert forward_calls[0] % passes == 0, (
+                f"{passes}-pass token decoder made {forward_calls[0]} calls"
             )
-        finally:
-            core.transformer_forward = original_forward
-        assert isinstance(answer, str)
-        assert pieces, "AXON did not stream any generated tokens"
-        assert forward_calls[0] >= 2, "Speculative neural lookahead was not used"
-        print(f"AXON neural forward passes for token generation: {forward_calls[0]}")
+            passes_checked[passes] = forward_calls[0]
+        print(f"Neural forward passes: 2-pass={passes_checked[2]}, "
+              f"3-pass={passes_checked[3]}")
 
-# Verify minimum 0.5 seconds per complete word, not per BPE fragment.
-chat_module = runpy.run_path(str(ROOT / "AXON_Local" / "CHAT.py"), run_name="axon_pacer_test")
-pacer = chat_module["WordPacedPrinter"](minimum_seconds=0.5)
+        # The inference cache should reuse exactly the same weights without
+        # decoding every Adam moment from BRAIN.db on each chat turn.
+        cached_a = core.load_inference_transformer(db, np, vocab)
+        cached_b = core.load_inference_transformer(db, np, vocab)
+        assert cached_a is cached_b, "Neural inference cache was not reused"
+        assert "_active_vocab" in cached_b
+        print("Neural inference weight cache: PASS")
+
+# BPE subword fragments must stream as whole words immediately without
+# a fake 0.5-second minimum delay between displayed words.
+chat_module = runpy.run_path(
+    str(ROOT / "AXON_Local" / "CHAT.py"), run_name="axon_stream_test"
+)
+streamer = chat_module["WordStreamPrinter"]()
 output = io.StringIO()
 with contextlib.redirect_stdout(output):
     start = time.monotonic()
-    pacer.on_piece("hel")
-    pacer.on_piece("lo ")
+    streamer.on_piece("hel")
+    streamer.on_piece("lo ")
     first = time.monotonic()
-    pacer.on_piece("wor")
-    pacer.on_piece("ld")
-    pacer.finish()
+    streamer.on_piece("wor")
+    streamer.on_piece("ld")
+    streamer.finish()
     second = time.monotonic()
-assert first - start >= 0.48, "First word appeared before 0.5 seconds"
-assert second - first >= 0.48, "Next word appeared before 0.5 seconds"
-assert output.getvalue() == "hello world", "BPE fragments failed to assemble into whole words"
-print(f"Word intervals: {first - start:.3f}s, {second - first:.3f}s")
+assert first - start < 0.3, "Word streaming still has artificial delays"
+assert second - first < 0.3, "Subsequent word was artificially delayed"
+assert output.getvalue() == "hello world", (
+    "BPE fragments failed to assemble into complete words"
+)
+print(f"Immediate word stream: {first - start:.3f}s, "
+      f"{second - first:.3f}s")
+
 
 CHAT = (ROOT / "AXON_Local" / "CHAT.py").read_text(encoding="utf-8")
 MANUAL = (ROOT / "AXON_Local" / "MANUAL Chat.py").read_text(encoding="utf-8")
 assert "retrieve_learned_reply" not in CHAT
 assert "learned_greeting_examples" not in CHAT
 assert "transformer_generate" in CHAT
+assert ':think 2' in CHAT and ':think 3' in CHAT
 assert "Teacher(" not in MANUAL
 assert "reviewer_model" in inspect.signature(core._chat_worker).parameters
 assert "reviewer_model" in inspect.signature(core.agent_dialogues_parallel).parameters
-print("PASS: max profile, infinite training, 5 GB cap, CPU/GPU paths, decreasing loss, lookahead and pacing.")
+print("PASS: 2/3 passes, immediate word streaming, inference cache, 5 GB cap, training.")
