@@ -66,6 +66,24 @@ def show_stats(db, vocab):
     print(f"Context: {core.TRANSFORMER_CONTEXT} BPE tokens | chat output budget {CHAT_MAX_NEW_TOKENS}")
     print(f"Tokenizer: {len(vocab):,} tokens | {merges:,} learned BPE merges")
     print(f"Training batches: {step:,} | validation loss: {validation}")
+    best = core.get_meta(db, "transformer_best_validation_loss", None)
+    if best is not None and core.best_checkpoint_available(db):
+        print(
+            f"Best validation loss: {best} at training batch "
+            f"{core.get_meta(db, 'transformer_best_step', '?')} | "
+            f"used for chat: {'yes' if core.inference_uses_best_checkpoint(db) else 'no'}"
+        )
+    train_loss = core.get_meta(db, 'transformer_last_train_loss', None)
+    if train_loss is not None:
+        print(f"Last training loss: {train_loss}")
+        try:
+            if float(validation) > float(train_loss) + 2.0:
+                print(
+                    "WARNING: Training/validation gap indicates memorization. "
+                    "Add diverse conversations rather than repeating old batches."
+                )
+        except (TypeError, ValueError):
+            pass
     print(f"BRAIN.db: {core.DB_PATH.stat().st_size / 1_000_000_000:.2f} GB / {core.MAX_DB_BYTES / 1_000_000_000:.2f} GB")
     print("Neural generation: 1 direct pass by default; experimental 2/3-pass lookahead is optional.")
     print("Text streams per complete word with no artificial waiting.")
@@ -97,6 +115,14 @@ def main():
             print(f"Loaded AXON checkpoint ({trained_steps:,} training batches).")
             validation = core.get_meta(db, "transformer_validation_loss", "n/a")
             print(f"Held-out validation loss: {validation}")
+            if core.inference_uses_best_checkpoint(db):
+                print("AXON will load its best-validation neural checkpoint.")
+            best = core.get_meta(db, 'transformer_best_validation_loss', None)
+            if best is None:
+                print(
+                    "No historical best checkpoint was saved by older versions. "
+                    "The updated trainer preserves the best weights from new runs."
+                )
             if trained_steps < 10000:
                 print(
                     "WARNING: This is still an experimental, undertrained model. "
