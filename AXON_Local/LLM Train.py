@@ -1783,6 +1783,8 @@ def _format_piece(token, previous):
         return text
     if not previous:
         return text[0].upper() + text[1:]
+    if has_space and (previous.endswith(('.', '!', '?')) or text == 'i'):
+        text = text[0].upper() + text[1:]
     return (' ' if has_space else '') + text
 
 
@@ -1837,8 +1839,8 @@ def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
         scores[1] = -1e9  # unknown
         scores[3] = -1e9  # user marker
         scores[4] = -1e9  # assistant marker
-        if step < 8:
-            scores[2] = -1e9  # minimum continuation
+        if step < 2:
+            scores[2] = -1e9  # allow short natural answers without forcing 8 tokens
 
         recent_counts = collections.Counter(generated[-96:])
         for token_id, count in recent_counts.items():
@@ -1902,7 +1904,7 @@ def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
             future_scores = future_logits[:, -1, :len(vocab)].astype('float64')
             future_scores[:, 0:2] = -1e9
             future_scores[:, 3:5] = -1e9
-            if step < 7:
+            if step < 1:
                 future_scores[:, 2] = -1e9
 
             def predictability(scores):
