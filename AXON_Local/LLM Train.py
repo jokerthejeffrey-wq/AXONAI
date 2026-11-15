@@ -1626,14 +1626,19 @@ def load_inference_transformer(db, np, vocab):
 
 
 def _format_piece(token, previous):
-    """Convert one BPE token to a streaming text fragment."""
+    """Format BPE output without splitting apostrophe contractions.
+
+    No vocabulary or neural checkpoint changes are required.
+    """
     has_space = token.startswith('▁')
     text = token[1:] if has_space else token
     if not text:
         return ''
-    if text in ('.', ',', '!', '?', ':', ';', '%', ')', ']', '}'):
+    if text in ('.', ',', '!', '?', ':', ';', '%', ')', ']', '}', "'", '’'):
         return text
     if text in ('(', '[', '{'):
+        return text
+    if previous in ("'", "’") and text in ('s', 't', 'm', 'd', 're', 've', 'll'):
         return text
     if not previous:
         return text[0].upper() + text[1:]
