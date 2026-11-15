@@ -1506,6 +1506,14 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
     last_loss = 0.0
     started = time.monotonic()
     print_every = max(1, int(print_every))
+    stalled_checks = 0
+    stopped_for_overfitting = False
+    # Record the starting model as a recoverable baseline. Existing
+    # 40K-step checkpoints are never discarded or reset.
+    starting_val = transformer_validation_loss(db, xp, params, vocab, limit=32)
+    save_best_validation_checkpoint(db, starting_val, total_steps)
+    set_meta(db, 'axon_training_overfit_stop', 0)
+    db.commit()
 
     # Bounded CPU producer: prepares the next batch while GPU/CPU optimizes
     # the current batch. Maximum two waiting batches limits additional RAM.
@@ -1603,13 +1611,31 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
                 save_transformer(db, cpu_np, params, moment1, moment2, total_steps)
                 # Small validation sample avoids long foreground stalls.
                 val = transformer_validation_loss(
-                    db, xp, params, vocab, limit=16
+                    db, xp, params, vocab, limit=32
                 )
                 set_meta(
                     db, 'transformer_validation_loss',
                     'n/a' if val is None else f'{val:.5f}'
                 )
                 db.commit()
+                improved = save_best_validation_checkpoint(db, val, total_steps)
+                best_text = get_meta(db, 'transformer_best_validation_loss')
+                if val is not None and best_text is not None:
+                    best_loss = float(best_text)
+                    if improved or val <= best_loss + 0.10:
+                        stalled_checks = 0
+                    elif val > best_loss + 0.18:
+                        stalled_checks += 1
+                    # Once validation has deteriorated on six successive
+                    # checkpoints, preserve the best version instead of
+                    # memorizing the same 800 examples indefinitely.
+                    if stalled_checks >= 6:
+                        stopped_for_overfitting = True
+                        say(
+                            'EARLY STOP: validation loss worsened repeatedly. '
+                            'Saved the best neural weights for chat. '
+                            'Add diverse conversations before more training.'
+                        )
                 elapsed = max(time.monotonic() - started, 0.001)
                 val_text = 'n/a' if val is None else f'{val:.3f}'
                 say(
@@ -1619,6 +1645,8 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
                     + f' | {elapsed:.1f}s | {"CUDA" if gpu else "CPU"}'
                     + f' | {governor.describe()}'
                 )
+                if stopped_for_overfitting:
+                    break
                 if (val is not None and last_loss < 0.15 and
                         val > last_loss + 3.0 and
                         batch_count % (5 * print_every) == 0):
@@ -1639,7 +1667,9 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
     val = transformer_validation_loss(db, xp, params, vocab, limit=32)
     set_meta(db, 'transformer_validation_loss', 'n/a' if val is None else f'{val:.5f}')
     set_meta(db, 'transformer_last_train_loss', f'{last_loss:.5f}')
+    set_meta(db, 'axon_training_overfit_stop', '1' if stopped_for_overfitting else '0')
     db.commit()
+    save_best_validation_checkpoint(db, val, total_steps)
     say(
         f'Transformer trained {batch_count:,} batches; total {total_steps:,}. '
         f'Final train loss {last_loss:.3f}; validation loss '
@@ -2575,6 +2605,13 @@ def main():
                         break
                 except (ValueError, TypeError):
                     pass
+                if get_meta(db, 'axon_training_overfit_stop') == '1':
+                    say(
+                        'Stopped continuous offline training to avoid further '
+                        'memorization. Generate or collect varied training '
+                        'conversations before restarting.'
+                    )
+                    break
                 if not args.forever:
                     break
         else:
