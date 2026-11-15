@@ -2154,6 +2154,56 @@ def learn_observations(db, np, steps=250, epochs=25, device='auto', resource_pro
     )
 
 
+def restart_with_supported_python():
+    """On Windows, prefer an already-installed Python 3.12/3.11.
+
+    The trainer uses sqlite3.Connection.blobopen (Python 3.11+), so silently
+    accepting an older Python would fail later or risk incomplete storage.
+    """
+    if sys.version_info >= (3, 11):
+        return
+    running = f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}'
+    candidates = []
+    if os.name == 'nt':
+        launcher = shutil.which('py')
+        if launcher:
+            candidates.extend(([launcher, '-3.12'], [launcher, '-3.11']))
+        local = os.environ.get('LOCALAPPDATA')
+        if local:
+            for minor in (12, 11):
+                candidate = Path(local) / 'Programs' / 'Python' / f'Python3{minor}' / 'python.exe'
+                if candidate.is_file():
+                    candidates.append([str(candidate)])
+    for executable in candidates:
+        try:
+            check = subprocess.run(
+                executable + ['-c',
+                    'import sys,sqlite3; '
+                    'assert sys.version_info >= (3,11) and '
+                    'hasattr(sqlite3.Connection,"blobopen")'],
+                timeout=8, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                check=False
+            )
+            if check.returncode != 0:
+                continue
+            say(
+                f'AXON detected Python {running}, which is too old. '
+                f'Automatically restarting under Python 3.11+ using '
+                f'{" ".join(executable)}'
+            )
+            raise SystemExit(
+                subprocess.call(executable + [str(Path(__file__).resolve())] + sys.argv[1:])
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+    raise RuntimeError(
+        f'Python 3.11 or newer is required; current interpreter is {running} '
+        f'at {sys.executable}. On Windows use: '
+        f'py -3.12 "LLM Train.py" --teacher --helpers 3 --chats 4 '
+        f'--rounds 8 --steps 400 --once'
+    )
+
+
 def main():
     parser=argparse.ArgumentParser(description='Parallel human/assistant conversations train AXON locally')
     parser.add_argument('--chats',type=int,default=4,help='simultaneous human/assistant chats (default: 4, max: 12)')
@@ -2179,7 +2229,7 @@ def main():
     if not 1<=args.chats<=12:parser.error('--chats must be between 1 and 12')
     if not 2<=args.rounds<=200:parser.error('--rounds must be between 2 and 200')
     if args.steps<1:parser.error('--steps must be at least 1')
-    if sys.version_info<(3,11):raise RuntimeError('Python 3.11 or newer is required.')
+    restart_with_supported_python()
     say('AXON AI | standalone NumPy autoregressive Transformer training')
     say(f'{len(ALL_SCENARIOS):,} learning categories, {len(STYLE_MODES)} speaking styles; Ctrl+C to stop.')
     say(f'Student: {PARAMETERS:,}-parameter causal Transformer ({TRANSFORMER_LAYERS} layers, {TRANSFORMER_HEADS} heads). Maximum BRAIN.db: 5 GB.')
