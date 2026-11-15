@@ -17,6 +17,18 @@ sys.modules[spec.name] = core
 spec.loader.exec_module(core)
 
 
+def best_checkpoint_available(db):
+    """Older trainer builds lack the optional best-checkpoint API."""
+    check = getattr(core, 'best_checkpoint_available', None)
+    return callable(check) and bool(check(db))
+
+
+def using_best_checkpoint(db):
+    """Do not crash if chat was updated before the local trainer."""
+    check = getattr(core, 'inference_uses_best_checkpoint', None)
+    return callable(check) and bool(check(db))
+
+
 class WordStreamPrinter:
     """Stream complete words as soon as they are decoded from BPE tokens.
 
@@ -67,11 +79,11 @@ def show_stats(db, vocab):
     print(f"Tokenizer: {len(vocab):,} tokens | {merges:,} learned BPE merges")
     print(f"Training batches: {step:,} | validation loss: {validation}")
     best = core.get_meta(db, "transformer_best_validation_loss", None)
-    if best is not None and core.best_checkpoint_available(db):
+    if best is not None and best_checkpoint_available(db):
         print(
             f"Best validation loss: {best} at training batch "
             f"{core.get_meta(db, 'transformer_best_step', '?')} | "
-            f"used for chat: {'yes' if core.inference_uses_best_checkpoint(db) else 'no'}"
+            f"used for chat: {'yes' if using_best_checkpoint(db) else 'no'}"
         )
     train_loss = core.get_meta(db, 'transformer_last_train_loss', None)
     if train_loss is not None:
@@ -103,6 +115,12 @@ def main():
         "Extra :think 2/3 passes are experimental."
     )
     print("Words stream immediately when decoded; no artificial delays.")
+    print(f"Trainer source: {TRAINER.resolve()}")
+    if not callable(getattr(core, 'inference_uses_best_checkpoint', None)):
+        print(
+            "Compatibility mode: older LLM Train.py detected. "
+            "Chat still works; update LLM Train.py to enable best-checkpoint selection."
+        )
     print("Type :help for commands.")
 
     with core.connection() as db:
@@ -115,7 +133,7 @@ def main():
             print(f"Loaded AXON checkpoint ({trained_steps:,} training batches).")
             validation = core.get_meta(db, "transformer_validation_loss", "n/a")
             print(f"Held-out validation loss: {validation}")
-            if core.inference_uses_best_checkpoint(db):
+            if using_best_checkpoint(db):
                 print("AXON will load its best-validation neural checkpoint.")
             best = core.get_meta(db, 'transformer_best_validation_loss', None)
             if best is None:
