@@ -45,7 +45,7 @@ CACHE = Path.home() / '.axon_four_files_cache'
 GGUF = CACHE / 'qwen2.5-0.5b-instruct-q4_k_m.gguf'
 TEACHER_URL = 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf'
 TEACHER_SHA = '74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db'
-MAX_DB_BYTES = 5 * 1024**3
+MAX_DB_BYTES = 5_000_000_000
 MAX_MODEL_BYTES = 2 * 1024**3
 VOCAB_SIZE = 16384
 DIM = 768  # legacy v5 embedding width; retained only to read/archive old checkpoints
@@ -80,14 +80,14 @@ def connection():
     db.execute('PRAGMA busy_timeout=120000')
     db.execute('PRAGMA journal_mode=DELETE')  # no permanent WAL/SHM project files
     db.execute('PRAGMA temp_store=MEMORY')
-    # SQLite itself enforces the 5 GiB maximum, even during blob writes.
+    # SQLite itself enforces the 5 GB maximum, even during blob writes.
     page_size = db.execute('PRAGMA page_size').fetchone()[0]
     max_pages = MAX_DB_BYTES // page_size
     applied_pages = db.execute(f'PRAGMA max_page_count={max_pages}').fetchone()[0]
     if applied_pages > max_pages:
         db.close()
         raise RuntimeError(
-            'Existing BRAIN.db is already larger than 5 GiB. Back it up and '
+            'Existing BRAIN.db is already larger than 5 GB. Back it up and '
             'compact it separately; nothing was deleted.'
         )
     db.execute('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, val TEXT NOT NULL)')
@@ -116,7 +116,7 @@ def enforce_db_size(db, incoming=0):
     pages = db.execute('PRAGMA page_count').fetchone()[0]
     size = db.execute('PRAGMA page_size').fetchone()[0]
     if pages * size + incoming > MAX_DB_BYTES:
-        raise RuntimeError('BRAIN.db would exceed the strict 5 GiB limit; training stopped safely.')
+        raise RuntimeError('BRAIN.db would exceed the strict 5 GB limit; training stopped safely.')
 
 
 def store_lesson(db, question, answer, origin='corpus'):
@@ -398,7 +398,7 @@ class AdaptiveResources:
                 raise RuntimeError('no CUDA device')
             free_vram, _ = cp.cuda.runtime.memGetInfo()
             if free_vram < 1536 * 1024**2:
-                raise RuntimeError('less than 1.5 GiB free CUDA VRAM')
+                raise RuntimeError('less than 1.5 GB free CUDA VRAM')
             # Avoid competing with foreground graphics/apps.
             if shutil.which('nvidia-smi'):
                 query = subprocess.run(
@@ -556,7 +556,7 @@ def ensure_teacher(db):
     if sha.hexdigest() != TEACHER_SHA:
         GGUF.unlink(missing_ok=True)
         raise RuntimeError('Downloaded GGUF SHA256 mismatch. Check internet connection and retry.')
-    # Do not duplicate this ~0.5 GiB teacher in BRAIN.db under the 5 GiB cap.
+    # Do not duplicate this ~0.5 GB teacher in BRAIN.db under the 5 GB cap.
     # The separate local cache is reused. Existing stored teacher blobs stay
     # untouched for users who already have them.
     set_meta(db, 'teacher_cache_sha', TEACHER_SHA)
@@ -2182,7 +2182,7 @@ def main():
     if sys.version_info<(3,11):raise RuntimeError('Python 3.11 or newer is required.')
     say('AXON AI | standalone NumPy autoregressive Transformer training')
     say(f'{len(ALL_SCENARIOS):,} learning categories, {len(STYLE_MODES)} speaking styles; Ctrl+C to stop.')
-    say(f'Student: {PARAMETERS:,}-parameter causal Transformer ({TRANSFORMER_LAYERS} layers, {TRANSFORMER_HEADS} heads). Maximum BRAIN.db: 5 GiB.')
+    say(f'Student: {PARAMETERS:,}-parameter causal Transformer ({TRANSFORMER_LAYERS} layers, {TRANSFORMER_HEADS} heads). Maximum BRAIN.db: 5 GB.')
     if args.teacher:
         say('Optional local training helpers: distinct conversational roles on one shared teacher model; chat stays AXON-only.')
     else:
