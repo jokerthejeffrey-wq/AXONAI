@@ -732,6 +732,7 @@ TRANSFORMER_LAYERS = 4
 TRANSFORMER_FF = 1024
 TRANSFORMER_CONTEXT = 256
 TRANSFORMER_BATCH = 2
+TRANSFORMER_LABEL_SMOOTHING = 0.05  # Reduce overconfident memorization without replacing learned tokens.
 MAX_GENERATION_TOKENS = 512
 GENERATION_TEMPERATURE = 0.72
 GENERATION_TOP_K = 32
@@ -1374,10 +1375,21 @@ def _trf_loss(np, params, x_ids, targets, loss_mask, backward=False):
     b_idx, t_idx = np.indices(targets.shape)
     chosen = probabilities[b_idx, t_idx, targets]
     denominator = max(float(loss_mask.sum()), 1.0)
-    loss = float(-(np.log(np.maximum(chosen, 1e-12)) * loss_mask).sum() / denominator)
+    # Mild label smoothing discourages near-certain next-token predictions
+    # from a tiny training set. It does NOT fabricate answers.
+    smooth = TRANSFORMER_LABEL_SMOOTHING
+    n_vocab = probabilities.shape[-1]
+    log_probs = np.log(np.maximum(probabilities, 1e-12))
+    hard_loss = -np.log(np.maximum(chosen, 1e-12))
+    smoothed_loss = -log_probs.mean(axis=-1)
+    loss = float(
+        (((1.0 - smooth) * hard_loss + smooth * smoothed_loss)
+         * loss_mask).sum() / denominator
+    )
     if not backward:
         return loss, None
-    probabilities[b_idx, t_idx, targets] -= 1.0
+    probabilities -= smooth / n_vocab
+    probabilities[b_idx, t_idx, targets] -= 1.0 - smooth
     probabilities *= (loss_mask / denominator)[..., None]
     gradients = _trf_backward(np, params, cache, probabilities)
     return loss, gradients
