@@ -129,22 +129,28 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert simulated == 2, "Alternative array backend path failed"
         print("Simulated GPU-backend training, optimizer and checkpoint: PASS")
 
-        # Each autoregressive generation decision must make exactly two or
-        # three Transformer forward passes over the full message context.
+        # Direct learned-token generation must be the default. Extra passes
+        # stay optional so the previous experimental reweighting cannot make
+        # AXON's normal responses less coherent.
+        assert core.GENERATION_THINK_PASSES == 1
         original_forward = core.transformer_forward
         passes_checked = {}
-        for passes in (2, 3):
+        first_inputs = {}
+        for passes in (1, 2, 3):
             pieces = []
             forward_calls = [0]
             def count_forward(*args, **kwargs):
                 forward_calls[0] += 1
+                if forward_calls[0] == 1:
+                    first_inputs[passes] = np.asarray(args[2]).copy()
                 return original_forward(*args, **kwargs)
             core.transformer_forward = count_forward
             try:
                 answer = core.transformer_generate(
-                    db, "hi", length=8, temperature=0.72,
-                    top_k=32, top_p=0.95, on_piece=pieces.append,
+                    db, "help me", length=8, temperature=0.62,
+                    top_k=32, top_p=0.9, on_piece=pieces.append,
                     think_passes=passes,
+                    history=[("hi", "hello there")],
                 )
             finally:
                 core.transformer_forward = original_forward
@@ -155,8 +161,28 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
                 f"{passes}-pass token decoder made {forward_calls[0]} calls"
             )
             passes_checked[passes] = forward_calls[0]
-        print(f"Neural forward passes: 2-pass={passes_checked[2]}, "
-              f"3-pass={passes_checked[3]}")
+            expected = [3] + [
+                {word: index for index, word in enumerate(vocab)}.get(token, 1)
+                for token in core.tokenizer("help me")
+            ] + [4]
+            assert first_inputs[passes].tolist() == [expected], (
+                "Chat included untrained multi-turn history in the input context"
+            )
+        print(
+            f"Neural forward passes for 8 tokens: baseline="
+            f"{passes_checked[1]}, two={passes_checked[2]}, "
+            f"three={passes_checked[3]}"
+        )
+        pieces = [
+            core._format_piece("▁how", ""),
+            core._format_piece("▁'", "how"),
+            core._format_piece("▁s", "'"),
+            core._format_piece("▁it", "s"),
+        ]
+        assert "".join(pieces) == "How's it", (
+            f"Contraction BPE detokenization still broken: {pieces}"
+        )
+        print("Apostrophe formatting and single-turn prompt matching: PASS")
 
         # The inference cache should reuse exactly the same weights without
         # decoding every Adam moment from BRAIN.db on each chat turn.
@@ -196,8 +222,10 @@ MANUAL = (ROOT / "AXON_Local" / "MANUAL Chat.py").read_text(encoding="utf-8")
 assert "retrieve_learned_reply" not in CHAT
 assert "learned_greeting_examples" not in CHAT
 assert "transformer_generate" in CHAT
+assert "        think_passes = 1" in CHAT
+assert '":think 1"' in CHAT
 assert ':think 2' in CHAT and ':think 3' in CHAT
 assert "Teacher(" not in MANUAL
 assert "reviewer_model" in inspect.signature(core._chat_worker).parameters
 assert "reviewer_model" in inspect.signature(core.agent_dialogues_parallel).parameters
-print("PASS: 2/3 passes, immediate word streaming, inference cache, 5 GB cap, training.")
+print("PASS: baseline 1-pass, opt-in 2/3, no history mismatch, contractions, fast streaming.")
