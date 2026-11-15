@@ -26,6 +26,22 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
     core.DB_PATH = Path(folder) / "BRAIN.db"
     core.DATA_PATH = Path(folder) / "training_data.txt"
     with core.connection() as db:
+        # SQLite-level enforcement is stronger than checking file size in Python.
+        page_size = db.execute("PRAGMA page_size").fetchone()[0]
+        page_cap = db.execute("PRAGMA max_page_count").fetchone()[0]
+        assert core.MAX_DB_BYTES == 5 * 1024**3
+        assert page_cap == core.MAX_DB_BYTES // page_size
+        try:
+            core.enforce_db_size(db, core.MAX_DB_BYTES)
+        except RuntimeError as exc:
+            assert "5 GiB" in str(exc)
+        else:
+            raise AssertionError("5 GiB database limit is not enforced")
+        print(f"SQLite BRAIN.db cap: {page_cap * page_size / 1024**3:.2f} GiB")
+        governor = core.AdaptiveResources()
+        assert governor.workers <= 4
+        assert governor.choose_backend("cpu") is None
+        print("Resource governor:", governor.describe())
         core.bootstrap_lessons(db)
         vocab = core.build_vocabulary(db)
         assert len(vocab) > len(core.SPECIAL)
@@ -94,4 +110,4 @@ assert "retrieve_learned_reply" not in CHAT
 assert "learned_greeting_examples" not in CHAT
 assert "transformer_generate" in CHAT
 assert "Teacher(" not in MANUAL
-print("PASS: BPE, decreasing loss, 4-branch neural lookahead, >=0.5s/word, AXON-only generation.")
+print("PASS: 5 GiB SQLite cap, adaptive CPU fallback, decreasing loss, neural lookahead, word pacing.")
