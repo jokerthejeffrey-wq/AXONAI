@@ -1490,6 +1490,11 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
         if gpu:
             batch = tuple(xp.asarray(item) for item in batch)
         last_loss, gradients = _trf_loss(xp, params, *batch, backward=True)
+        if not math.isfinite(float(last_loss)):
+            raise RuntimeError(
+                'Non-finite training loss detected. Training stopped to '
+                'protect the last saved Transformer checkpoint.'
+            )
         # GPU: reduce all gradient norms on-device and synchronize once.
         norm_sq = float(sum((grad * grad).sum() for grad in gradients.values()))
         grad_scale = min(1.0, 1.0 / max(math.sqrt(norm_sq), 1e-8))
@@ -1539,6 +1544,14 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
                     + f' | {elapsed:.1f}s | {"CUDA" if gpu else "CPU"}'
                     + f' | {governor.describe()}'
                 )
+                if (val is not None and last_loss < 0.15 and
+                        val > last_loss + 3.0 and
+                        batch_count % (5 * print_every) == 0):
+                    say(
+                        'OVERFITTING: repeated examples are being memorized, '
+                        'not generalized. Add new accurate conversations '
+                        'or use --teacher for fresh training data.'
+                    )
     except KeyboardInterrupt:
         say('\nInterrupted: saving Transformer weights and Adam state...')
         save_transformer(db, cpu_np, params, moment1, moment2, total_steps)
