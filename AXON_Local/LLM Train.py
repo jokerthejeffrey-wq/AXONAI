@@ -1459,9 +1459,18 @@ def _trf_loss(np, params, x_ids, targets, loss_mask, backward=False):
 
 def transformer_validation_loss(db, np, params, vocab, limit=40):
     """Held-out loss on every tenth saved lesson; no gradient updates."""
+    real_count = db.execute(
+        "SELECT COUNT(*) FROM lessons "
+        "WHERE origin IN ('user','teacher','dialogue_quality_v5')"
+    ).fetchone()[0]
+    valid_origins = (
+        "('user','teacher','dialogue_quality_v5')"
+        if real_count >= 100
+        else "('seed','user','teacher','dialogue_quality_v5')"
+    )
     rows = db.execute(
         "SELECT prompt,answer FROM lessons "
-        "WHERE id % 10 = 0 AND origin IN ('seed','user','teacher','dialogue_quality_v5') "
+        f"WHERE id % 10 = 0 AND origin IN {valid_origins} "
         "ORDER BY id DESC LIMIT ?", (max(1, int(limit)),)
     ).fetchall()
     if not rows:
@@ -2374,6 +2383,16 @@ def learn_observations(db, np, steps=250, epochs=25, device='auto',
     user = fetch('user', 2000)
     seeds = fetch('seed', 250)
     regular = dialogue + teacher
+    # Seed greetings are literal demonstrations, not a diverse language
+    # corpus. Stop training on them once we have enough real conversations,
+    # or AXON learns to repeat the same 'hi' answer indefinitely.
+    if len(regular) + len(user) >= 100:
+        if seeds:
+            say(
+                'Ignoring built-in seed greetings during neural training; '
+                'using actual saved conversations instead.'
+            )
+        seeds = []
     pool = regular or user or seeds
     has_corpus = bool(include_corpus and DATA_PATH.is_file())
     if not pool and not has_corpus:
