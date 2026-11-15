@@ -1119,7 +1119,8 @@ def save_best_validation_checkpoint(db, loss, step):
     Does not modify the current checkpoint or training optimizer state.
     Old weights and user lessons remain intact.
     """
-    if loss is None or not math.isfinite(float(loss)):
+    if loss is None or not math.isfinite(float(loss)) or int(step) <= 0:
+        # Random, completely untrained weights are never a chat candidate.
         return False
     old = get_meta(db, 'transformer_best_validation_loss')
     best_version = get_meta(db, 'transformer_best_version')
