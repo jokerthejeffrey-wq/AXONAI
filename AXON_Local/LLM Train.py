@@ -2110,57 +2110,95 @@ def agent_dialogue(db, teacher, turns=8, topic=None, display=True):
     return str(sessions),pairs*2
 
 
-def learn_observations(db, np, steps=250, epochs=25, device='auto', resource_profile='balanced'):
-    """Train real next-token gradients using balanced conversational data.
+def learn_observations(db, np, steps=250, epochs=25, device='auto',
+                       resource_profile='balanced', include_corpus=False):
+    """Train on conversation examples, optionally streaming the full local corpus.
 
-    A small number of explicitly taught examples must not disappear inside
-    thousands of teacher dialogues. The model still generates every token
-    itself during chat: these lessons are used ONLY as gradient targets.
-    Every tenth lesson is held out for validation and never sampled here.
+    Max mode reservoir-samples ALL saved lessons using bounded RAM. The
+    independent held-out split is kept out of training. With --all, local
+    training_data.txt is read sequentially during training, not loaded into RAM.
     """
     def fetch(origin, limit):
-        return db.execute(
-            "SELECT prompt,answer FROM lessons "
-            "WHERE origin=? AND id % 10 != 0 ORDER BY id DESC LIMIT ?",
-            (origin, limit)
-        ).fetchall()
+        if resource_profile != 'max':
+            return db.execute(
+                "SELECT prompt,answer FROM lessons "
+                "WHERE origin=? AND id % 10 != 0 ORDER BY id DESC LIMIT ?",
+                (origin, limit)
+            ).fetchall()
+        # Maximum variety with capped RAM: consider every row in BRAIN.db,
+        # maintaining a uniform sample rather than selecting only recent rows.
+        cap = min(100000, max(1, limit * 10))
+        picked = []
+        rng = random.Random(20261115 + sum(map(ord, origin)))
+        for index, row in enumerate(db.execute(
+            "SELECT prompt,answer FROM lessons WHERE origin=? AND id % 10 != 0",
+            (origin,)
+        )):
+            if index < cap:
+                picked.append(row)
+            else:
+                j = rng.randrange(index + 1)
+                if j < cap:
+                    picked[j] = row
+        return picked
 
-    dialogue = fetch("dialogue_quality_v5", 6000)
-    teacher = fetch("teacher", 1000)
-    user = fetch("user", 2000)
-    seeds = fetch("seed", 250)
+    dialogue = fetch('dialogue_quality_v5', 6000)
+    teacher = fetch('teacher', 1000)
+    user = fetch('user', 2000)
+    seeds = fetch('seed', 250)
     regular = dialogue + teacher
-
-    if not regular and not user and not seeds:
-        say("No training examples available; skipping.")
+    pool = regular or user or seeds
+    has_corpus = bool(include_corpus and DATA_PATH.is_file())
+    if not pool and not has_corpus:
+        say('No training examples available; skipping.')
         return 0
     validation_count = db.execute(
         "SELECT COUNT(*) FROM lessons WHERE id % 10 = 0 "
         "AND origin IN ('seed','user','teacher','dialogue_quality_v5')"
     ).fetchone()[0]
     say(
-        f"AXON training data: {len(dialogue):,} conversations, "
-        f"{len(teacher):,} teacher lessons, {len(user):,} personal lessons, "
-        f"{len(seeds):,} seed examples; "
-        f"{validation_count:,} held-out validation examples."
+        f'AXON training data: {len(dialogue):,} conversations, '
+        f'{len(teacher):,} teacher lessons, {len(user):,} personal lessons, '
+        f'{len(seeds):,} seed examples; '
+        f'{validation_count:,} held-out validation examples.'
     )
+    if resource_profile == 'max':
+        say('MAX DATA: sampled across all stored lessons, with bounded RAM.')
+    if has_corpus:
+        say('Full local training_data.txt: streaming throughout training.')
 
-    # Typical mix with all groups present:
-    # 80% diverse conversation / 10% user's examples / 10% seed.
-    # This is *training data selection*, not response retrieval.
     def training_rows():
         rng = random.Random(20261115)
         index = 0
+        corpus = example_lines(None) if has_corpus else None
         while True:
             phase = index % 10
+            index += 1
+            if corpus is not None and (phase in (4, 7) or not pool):
+                try:
+                    yield next(corpus)
+                    continue
+                except StopIteration:
+                    corpus = example_lines(None)
+                    try:
+                        yield next(corpus)
+                        continue
+                    except StopIteration:
+                        corpus = None
             if phase == 0 and user:
                 selected = user
             elif phase == 1 and seeds:
                 selected = seeds
             else:
+                selected = pool
+            if not selected:
                 selected = regular or user or seeds
-            index += 1
-            yield rng.choice(selected)
+            if selected:
+                yield rng.choice(selected)
+            else:
+                # A valid corpus was consumed; next iteration retries its
+                # stream. This occurs only with an empty local corpus file.
+                return
 
     return train_student(
         db, np, training_rows(),
@@ -2262,7 +2300,7 @@ def main():
     parser.add_argument('--offline',action='store_true',default=True,help='AXON-only training from saved examples (default)')
     parser.add_argument('--teacher',action='store_true',help='optional: generate extra training data with a separate local teacher model')
     parser.add_argument('--corpus-examples',type=int,default=0,help='extra synthetic corpus rows (default: 0)')
-    parser.add_argument('--all',action='store_true',help='also use entire synthetic corpus; very slow and not conversational')
+    parser.add_argument('--all',action='store_true',help='stream the entire local training_data.txt alongside conversations')
     parser.add_argument('--distill',type=int,default=None,help='legacy alias for --rounds')
     parser.add_argument('--examples',type=int,default=None,help='legacy alias for --corpus-examples')
     args=parser.parse_args()
@@ -2331,7 +2369,8 @@ def main():
                 )
                 learn_observations(
                     db, np, steps=args.steps,
-                    device=args.device, resource_profile=args.profile
+                    device=args.device, resource_profile=args.profile,
+                    include_corpus=args.all
                 )
                 val_str = get_meta(db, 'transformer_validation_loss', 'n/a')
                 train_str = get_meta(db, 'transformer_last_train_loss', 'n/a')
@@ -2413,7 +2452,8 @@ def main():
                         # would prevent the helper AIs from generating more lessons.
                         learn_observations(
                             db,np,steps=400 if args.steps is None else args.steps,
-                            device=args.device,resource_profile=args.profile
+                            device=args.device,resource_profile=args.profile,
+                            include_corpus=args.all
                         )
                     else:
                         say('No valid answers generated, so no training occurred this cycle.')
@@ -2431,7 +2471,8 @@ def main():
                     local_helpers, local_helpers,
                     local_helpers if active_helpers >= 3 else None
                 )
-        if args.all or args.corpus_examples>0:
+        # --all is already streamed into every training batch above.
+        if args.corpus_examples>0 and not args.all:
             if not DATA_PATH.is_file():say('No training_data.txt found; skipped corpus stage.')
             else:
                 say('Extra synthetic math/programming corpus stage...')
