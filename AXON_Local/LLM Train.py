@@ -1681,19 +1681,36 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
 _AXON_INFERENCE_CACHE = None
 
 
-def load_inference_transformer(db, np, vocab):
-    """Reuse AXON's neural weights between chat turns without loading Adam state.
+def inference_uses_best_checkpoint(db):
+    """Use held-out-best neural weights when more recent training regressed."""
+    if not best_checkpoint_available(db):
+        return False
+    best = get_meta(db, 'transformer_best_validation_loss')
+    latest = get_meta(db, 'transformer_validation_loss')
+    try:
+        if latest is None:
+            return True
+        return math.isfinite(float(best)) and float(best) + 0.05 < float(latest)
+    except (TypeError, ValueError):
+        return True
 
-    Chat never needs the first/second-moment optimizer tensors. Decompressing
-    all three states on every message used to delay the first generated word.
-    The cache automatically refreshes after :teach or :train changes the
-    checkpoint step, and remains independent of saved-answer retrieval.
+
+def load_inference_transformer(db, np, vocab):
+    """Load ONLY AXON neural weights; cache by checkpoint selection.
+
+    Older training may have overfit. If a separately saved checkpoint has
+    lower held-out loss, chat loads it without overwriting current training
+    weights or optimizer state in BRAIN.db.
     """
     global _AXON_INFERENCE_CACHE
+    use_best = inference_uses_best_checkpoint(db)
     signature = (
         str(DB_PATH.resolve()),
         get_meta(db, 'transformer_version'),
         get_meta(db, 'transformer_steps'),
+        get_meta(db, 'transformer_best_step'),
+        get_meta(db, 'transformer_best_validation_loss'),
+        use_best,
     )
     if (_AXON_INFERENCE_CACHE is not None and
             _AXON_INFERENCE_CACHE[0] == signature):
@@ -1706,9 +1723,10 @@ def load_inference_transformer(db, np, vocab):
     else:
         params = {}
         shapes = _trf_shapes()
+        prefix = 'trf_best_p_' if use_best else 'trf_p_'
         for name in _trf_parameter_names():
             row = db.execute(
-                'SELECT value FROM weights WHERE key=?', ('trf_p_' + name,)
+                'SELECT value FROM weights WHERE key=?', (prefix + name,)
             ).fetchone()
             if not row:
                 raise RuntimeError(
@@ -1718,12 +1736,20 @@ def load_inference_transformer(db, np, vocab):
             params[name] = np.frombuffer(
                 zlib.decompress(row[0]), dtype='<f4'
             ).copy().reshape(shapes[name])
+        if use_best:
+            say(
+                'AXON chat: using best held-out-validation checkpoint '
+                f'(batch {get_meta(db, "transformer_best_step", "unknown")}).'
+            )
 
     params['_active_vocab'] = len(vocab)
     signature = (
         str(DB_PATH.resolve()),
         get_meta(db, 'transformer_version'),
         get_meta(db, 'transformer_steps'),
+        get_meta(db, 'transformer_best_step'),
+        get_meta(db, 'transformer_best_validation_loss'),
+        use_best,
     )
     _AXON_INFERENCE_CACHE = (signature, params)
     return params
