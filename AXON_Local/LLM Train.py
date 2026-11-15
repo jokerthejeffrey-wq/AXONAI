@@ -649,9 +649,14 @@ class Teacher:
             s.bind(('127.0.0.1',0))
             self.port = s.getsockname()[1]
         self.log = tempfile.TemporaryFile(mode='w+b')
+        helper_threads = (
+            self.resources.workers if self.resources is not None and
+            self.resources.profile == 'max'
+            else max(1, min(4, (os.cpu_count() or 4)//2))
+        )
         args=[str(exe), '-m',str(self.model),'--host','127.0.0.1','--port',str(self.port),
               '-c',str(self.parallel*2048),'-np',str(self.parallel),'-cb',
-              '-t',str(max(1,min(4,(os.cpu_count() or 4)//2))),'-ngl','0']
+              '-t',str(helper_threads),'-ngl','0']
         say(f'Starting local {self.role} model (CPU, {self.parallel} parallel slots)...')
         self.proc=subprocess.Popen(args,stdout=self.log,stderr=subprocess.STDOUT,cwd=str(exe.parent))
         limit=time.monotonic()+150
@@ -1429,7 +1434,7 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
 
     # Bounded CPU producer: prepares the next batch while GPU/CPU optimizes
     # the current batch. Maximum two waiting batches limits additional RAM.
-    prepared = queue.Queue(maxsize=2)
+    prepared = queue.Queue(maxsize=8 if resource_profile == 'max' else 2)
     stop_prefetch = threading.Event()
 
     def prefetch():
@@ -2370,7 +2375,16 @@ def main():
             resources.sample(force=True)
             available_gb = (resources.ram_available or 0) / 1024**3
             requested = min(args.chats, max(1, resources.cores // 3))
-            if (resources.cpu_percent is not None and resources.cpu_percent >= 75) or (
+            if args.profile == 'max':
+                # Explicitly favor throughput: avoid CPU-utilization-based
+                # reductions while still respecting a coarse RAM slot budget.
+                ram_slots = (
+                    max(1, int(max(0.0, available_gb - 1.25) / 0.40))
+                    if resources.ram_available is not None else args.chats
+                )
+                active_chats = max(1, min(args.chats, ram_slots))
+                active_helpers = args.helpers
+            elif (resources.cpu_percent is not None and resources.cpu_percent >= 75) or (
                 resources.ram_available is not None and available_gb < 3
             ):
                 active_chats = 1
