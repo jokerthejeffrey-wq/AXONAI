@@ -88,19 +88,28 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         # real Transformer loop without actually running indefinitely in CI.
         original_train_student = core.train_student
         sent = {}
+        core.DATA_PATH.write_text(
+            "unique corpus question\\tunique corpus answer\\n".replace(
+                "\\\\t", "\\t"
+            ).replace("\\\\n", "\\n"),
+            encoding="utf-8"
+        )
         def record_infinite_training(*args, **kwargs):
             sent.update(kwargs)
+            sent["sample"] = list(itertools.islice(args[2], 30))
             return 1
         core.train_student = record_infinite_training
         try:
             assert core.learn_observations(
-                db, np, steps=None, device="cpu", resource_profile="max"
+                db, np, steps=None, device="cpu",
+                resource_profile="max", include_corpus=True
             ) == 1
         finally:
             core.train_student = original_train_student
         assert sent.get("max_steps") is None
         assert sent.get("resource_profile") == "max"
-        print("Infinite training stream forwards no step limit: PASS")
+        assert any("unique corpus question" in q for q, a in sent["sample"])
+        print("Infinite training and full-corpus streaming: PASS")
 
         # Exercise the alternative accelerator code path without requiring a
         # CUDA GPU on GitHub's normal hosted CI runner.
