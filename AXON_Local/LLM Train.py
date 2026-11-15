@@ -625,8 +625,9 @@ def server_binary():
 
 
 class Teacher:
-    def __init__(self, model, parallel=4, role="Teacher"):
+    def __init__(self, model, parallel=4, role="Teacher", resources=None):
         self.model = model
+        self.resources = resources
         self.role = role
         self.parallel = max(1, min(12, int(parallel)))
         self.proc = None
@@ -661,6 +662,8 @@ class Teacher:
         raise RuntimeError('Could not start llama-server. Logs:\n'+logs)
 
     def complete(self, messages, max_tokens=180, stream=False, temperature=.6):
+        if self.resources is not None:
+            self.resources.throttle()
         payload={'model':'local','messages':messages,'max_tokens':max_tokens,
                  'temperature':temperature,'stream':stream, 'top_p':0.9, 'repeat_penalty':1.12, 'frequency_penalty':0.15}
         req=urllib.request.Request(f'http://127.0.0.1:{self.port}/v1/chat/completions',
@@ -1520,6 +1523,7 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
                     + (f'/{max_steps:,}' if max_steps is not None else '')
                     + f' | train loss {last_loss:.3f} | validation loss {val_text}'
                     + f' | {elapsed:.1f}s | {"CUDA" if gpu else "CPU"}'
+                    + f' | {governor.describe()}'
                 )
     except KeyboardInterrupt:
         say('\nInterrupted: saving Transformer weights and Adam state...')
@@ -2287,7 +2291,10 @@ def main():
                     enforce_db_size(db)
                     say(f'BRAIN.db: {DB_PATH.stat().st_size/1024**2:.1f} MiB / 5120 MiB.')
                     if not args.forever:break
-            with Teacher(model,parallel=active_chats,role='Human+Answerer+Reviewer') as local_helpers:
+            with Teacher(
+                model,parallel=active_chats,role='Human+Answerer+Reviewer',
+                resources=resources
+            ) as local_helpers:
                 training_loop(
                     local_helpers, local_helpers,
                     local_helpers if active_helpers >= 3 else None
