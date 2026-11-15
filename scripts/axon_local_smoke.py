@@ -66,6 +66,7 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert tokens and all(token in set(vocab) for token in tokens)
         assert core._format_piece('▁', 'hello') == ' '
         assert core._format_piece('▁friend', 'hello') == ' friend'
+        assert core._format_piece('▁how', 'Hello!') == ' How'
         assert core.TRANSFORMER_LABEL_SMOOTHING == 0.05
 
         # Verify that the actual neural optimizer reduces next-token error,
@@ -138,6 +139,34 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert sent.get("resource_profile") == "max"
         assert any("unique corpus question" in q for q, a in sent["sample"])
         print("Infinite training and full-corpus streaming: PASS")
+
+        # Once conversation data exists, do not oversample literal baked-in
+        # seed greetings such as hi -> Hello! How are you doing today?
+        for i in range(120):
+            core.store_lesson(
+                db, f"conversation request number {i}",
+                f"unique natural reply number {i}", "dialogue_quality_v5"
+            )
+        db.commit()
+        sampled = {}
+        core.train_student = lambda *args, **kwargs: (
+            sampled.update({
+                'rows': list(itertools.islice(args[2], 120)),
+                'kwargs': kwargs,
+            }) or 1
+        )
+        try:
+            assert core.learn_observations(
+                db, np, steps=1, device='cpu', resource_profile='balanced'
+            ) == 1
+        finally:
+            core.train_student = original_train_student
+        assert sampled['rows']
+        assert all((q, a) != ('hi', 'Hello! How are you doing today?')
+                   for q, a in sampled['rows']), (
+            "The model is still repeatedly training on the hardcoded hi greeting"
+        )
+        print("Canned seed greeting oversampling eliminated: PASS")
 
         # Exercise the alternative accelerator code path without requiring a
         # CUDA GPU on GitHub's normal hosted CI runner.
