@@ -733,11 +733,11 @@ TRANSFORMER_FF = 1024
 TRANSFORMER_CONTEXT = 256
 TRANSFORMER_BATCH = 2
 MAX_GENERATION_TOKENS = 512
-GENERATION_TEMPERATURE = 0.72
-GENERATION_TOP_K = 64
-GENERATION_TOP_P = 0.95
+GENERATION_TEMPERATURE = 0.62
+GENERATION_TOP_K = 32
+GENERATION_TOP_P = 0.90
 GENERATION_LOOKAHEAD_BRANCHES = 2
-GENERATION_THINK_PASSES = 2  # Full-context prediction plus one lookahead by default.
+GENERATION_THINK_PASSES = 1  # Safest: sample directly from AXON's trained next-token distribution.
 GENERATION_LOOKAHEAD_WEIGHT = 0.30
 TRANSFORMER_VERSION = 'axon-causal-transformer-v2-bpe'
 TRANSFORMER_CONFIG = {
@@ -1658,8 +1658,8 @@ def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
         return '[AXON Transformer has not been trained yet. Run LLM Train.py first.]'
     params = load_inference_transformer(db, np, vocab)
     think_passes = int(think_passes)
-    if think_passes not in (2, 3):
-        raise ValueError('think_passes must be 2 or 3')
+    if think_passes not in (1, 2, 3):
+        raise ValueError('think_passes must be 1, 2 or 3')
     lookup = {token: index for index, token in enumerate(vocab)}
 
     # Recent turns are prompt context only; no saved answer is retrieved.
