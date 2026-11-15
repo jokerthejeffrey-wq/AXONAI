@@ -1649,12 +1649,10 @@ def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
                          temperature=GENERATION_TEMPERATURE, top_k=GENERATION_TOP_K,
                          top_p=GENERATION_TOP_P, on_piece=None, history=None,
                          think_passes=GENERATION_THINK_PASSES):
-    """Generate AXON-only tokens; 2 or 3 context-aware passes per token.
+    """Generate tokens using AXON's weights.
 
-    Pass one conditions on the full latest input and conversation history.
-    Pass two checks plausible next-token continuations; the optional third
-    pass evaluates their following continuations. This is not genuine human
-    chain-of-thought or a guarantee of correctness.
+    One-pass mode preserves learned token probabilities. Extra evaluation
+    passes remain experimental and may worsen untrained model behavior.
     """
     np = ensure_numpy()
     vocab = build_vocabulary(db)
@@ -1667,16 +1665,14 @@ def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
         raise ValueError('think_passes must be 1, 2 or 3')
     lookup = {token: index for index, token in enumerate(vocab)}
 
-    # Recent turns are prompt context only; no saved answer is retrieved.
-    context_tokens = []
-    if history:
-        for old_question, old_answer in history[-6:]:
-            context_tokens.extend(
-                [3] + [lookup.get(token, 1) for token in tokenizer(old_question)]
-                + [4] + [lookup.get(token, 1) for token in tokenizer(old_answer)] + [2]
-            )
-    context_tokens.extend(
-        [3] + [lookup.get(token, 1) for token in tokenizer(prompt)] + [4]
+    # Training examples are ONE user question plus ONE assistant answer.
+    # Feeding preceding answers into the model as multi-turn conversation
+    # changes the input format it learned, causing off-topic continuations.
+    # Until multi-turn training is added, infer from the CURRENT message.
+    context_tokens = (
+        [3]
+        + [lookup.get(token, 1) for token in tokenizer(prompt)]
+        + [4]
     )
     context_tokens = context_tokens[-TRANSFORMER_CONTEXT:]
     if context_tokens and context_tokens[0] != 3:
