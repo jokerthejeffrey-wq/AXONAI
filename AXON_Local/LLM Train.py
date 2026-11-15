@@ -1530,6 +1530,7 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
     save_transformer(db, cpu_np, params, moment1, moment2, total_steps)
     val = transformer_validation_loss(db, xp, params, vocab, limit=32)
     set_meta(db, 'transformer_validation_loss', 'n/a' if val is None else f'{val:.5f}')
+    set_meta(db, 'transformer_last_train_loss', f'{last_loss:.5f}')
     db.commit()
     say(
         f'Transformer trained {batch_count:,} batches; total {total_steps:,}. '
@@ -2197,6 +2198,8 @@ def main():
                     'does not make a fluent language model. Gather varied, accurate conversations.'
                 )
             cycle = 0
+            best_validation = None
+            worsening_cycles = 0
             while True:
                 cycle += 1
                 say(
@@ -2207,11 +2210,38 @@ def main():
                     db, np, steps=args.steps,
                     device=args.device, resource_profile=args.profile
                 )
+                val_str = get_meta(db, 'transformer_validation_loss', 'n/a')
+                train_str = get_meta(db, 'transformer_last_train_loss', 'n/a')
                 say(
                     f'Checkpoint: {int(get_meta(db, "transformer_steps", 0)):,} total batches '
-                    f'| validation loss {get_meta(db, "transformer_validation_loss", "n/a")} '
+                    f'| train {train_str} | validation {val_str}'
                     f'| database {DB_PATH.stat().st_size / 1024**2:.0f} MiB'
                 )
+                try:
+                    val = float(val_str)
+                    train = float(train_str)
+                    if not math.isfinite(val):
+                        raise ValueError('non-finite validation')
+                    if train < 0.15 and val > train + 3.0:
+                        say(
+                            'OVERFITTING WARNING: training loss is near zero '
+                            'but validation is high. Repeating these conversations '
+                            'will not teach unseen questions. Collect new real examples.'
+                        )
+                    if best_validation is None or val < best_validation - 0.05:
+                        best_validation = val
+                        worsening_cycles = 0
+                    elif val > best_validation + 0.15:
+                        worsening_cycles += 1
+                    if worsening_cycles >= 3:
+                        say(
+                            'Auto-stopped after three degrading validation cycles '
+                            'to protect the model from further memorization. '
+                            'Add more varied Q&A pairs, then restart training.'
+                        )
+                        break
+                except (ValueError, TypeError):
+                    pass
                 if not args.forever:
                     break
         else:
