@@ -276,6 +276,37 @@ print(f"Immediate word stream: {first - start:.3f}s, "
       f"{second - first:.3f}s")
 
 
+# Regression: the user's LLM Chat.py was newer than their local trainer
+# and crashed before input() because the optional best-checkpoint function
+# was missing. Simulate that exact older-trainer situation.
+from unittest.mock import patch
+chat_core = chat_module["core"]
+chat_core.DB_PATH = core.DB_PATH
+chat_core.DATA_PATH = core.DATA_PATH
+older_selector = getattr(chat_core, 'inference_uses_best_checkpoint', None)
+older_checker = getattr(chat_core, 'best_checkpoint_available', None)
+try:
+    if older_selector is not None:
+        delattr(chat_core, 'inference_uses_best_checkpoint')
+    if older_checker is not None:
+        delattr(chat_core, 'best_checkpoint_available')
+    assert not chat_module['using_best_checkpoint'](None)
+    assert not chat_module['best_checkpoint_available'](None)
+    startup = io.StringIO()
+    with contextlib.redirect_stdout(startup):
+        with patch('builtins.input', side_effect=[':stats', ':exit']):
+            chat_module['main']()
+    output = startup.getvalue()
+    assert "Compatibility mode: older LLM Train.py detected" in output
+    assert "Training batches:" in output
+    assert "Trainer source:" in output
+    print("Old-trainer startup + :stats compatibility regression: PASS")
+finally:
+    if older_selector is not None:
+        setattr(chat_core, 'inference_uses_best_checkpoint', older_selector)
+    if older_checker is not None:
+        setattr(chat_core, 'best_checkpoint_available', older_checker)
+
 CHAT = (ROOT / "AXON_Local" / "CHAT.py").read_text(encoding="utf-8")
 MANUAL = (ROOT / "AXON_Local" / "MANUAL Chat.py").read_text(encoding="utf-8")
 assert "retrieve_learned_reply" not in CHAT
@@ -287,4 +318,4 @@ assert ':think 2' in CHAT and ':think 3' in CHAT
 assert "Teacher(" not in MANUAL
 assert "reviewer_model" in inspect.signature(core._chat_worker).parameters
 assert "reviewer_model" in inspect.signature(core.agent_dialogues_parallel).parameters
-print("PASS: best model snapshot, early-stop safeguards, smoothing, word spacing and neural streaming.")
+print("PASS: older trainer startup compatibility, best checkpoint, neural learning and streaming.")
