@@ -46,6 +46,7 @@ GGUF = CACHE / 'qwen2.5-0.5b-instruct-q4_k_m.gguf'
 TEACHER_URL = 'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf'
 TEACHER_SHA = '74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db'
 MAX_DB_BYTES = 5_000_000_000
+AXON_PERFORMANCE_PROFILE = 'balanced'
 MAX_MODEL_BYTES = 2 * 1024**3
 VOCAB_SIZE = 16384
 DIM = 768  # legacy v5 embedding width; retained only to read/archive old checkpoints
@@ -258,7 +259,8 @@ class AdaptiveResources:
     def __init__(self, profile='balanced'):
         self.profile = profile
         self.cores = max(1, os.cpu_count() or 2)
-        self.workers = max(1, min(4, (self.cores - 1) // 2 or 1))
+        self.workers = (max(1, self.cores - 1) if profile == 'max' else
+                        max(1, min(4, (self.cores - 1) // 2 or 1)))
         self.cpu_percent = None
         self.ram_available = None
         self.ram_total = None
@@ -272,7 +274,8 @@ class AdaptiveResources:
             psutil.cpu_percent(interval=None)
         except ImportError:
             pass
-        self._reduce_process_priority()
+        if profile != 'max':
+            self._reduce_process_priority()
         # Restrict existing OpenBLAS/MKL pools if threadpoolctl is available;
         # environment variables alone only apply before NumPy is imported.
         try:
@@ -359,7 +362,8 @@ class AdaptiveResources:
         self.sample()
         if self.ram_available is None:
             return True
-        reserve = max(768 * 1024**2, int((self.ram_total or 0) * 0.10))
+        reserve = (512 * 1024**2 if self.profile == 'max' else
+                   max(768 * 1024**2, int((self.ram_total or 0) * 0.10)))
         return self.ram_available > reserve
 
     def throttle(self):
@@ -371,6 +375,8 @@ class AdaptiveResources:
                 self.last_report = time.monotonic()
             time.sleep(1.0)
             self.sample(force=True)
+        if self.profile == 'max':
+            return  # explicit full-speed mode; RAM safety pause still applies
         usage = self.cpu_percent
         if usage is not None:
             if usage >= 92.0:
@@ -397,10 +403,11 @@ class AdaptiveResources:
             if cp.cuda.runtime.getDeviceCount() < 1:
                 raise RuntimeError('no CUDA device')
             free_vram, _ = cp.cuda.runtime.memGetInfo()
-            if free_vram < 1536 * 1024**2:
-                raise RuntimeError('less than 1.5 GB free CUDA VRAM')
+            minimum_vram = 1024 * 1024**2 if self.profile == 'max' else 1536 * 1024**2
+            if free_vram < minimum_vram:
+                raise RuntimeError('not enough free CUDA VRAM')
             # Avoid competing with foreground graphics/apps.
-            if shutil.which('nvidia-smi'):
+            if self.profile != 'max' and shutil.which('nvidia-smi'):
                 query = subprocess.run(
                     ['nvidia-smi', '--query-gpu=utilization.gpu',
                      '--format=csv,noheader,nounits'],
@@ -422,20 +429,22 @@ class AdaptiveResources:
             return None
 
 
-def _limit_numpy_threads():
-    """Keep CPU cores free for Windows and other foreground applications."""
+def _limit_numpy_threads(profile=None):
+    """Choose bounded, high-throughput BLAS threading for the selected mode."""
+    profile = profile or AXON_PERFORMANCE_PROFILE
     cores = max(1, os.cpu_count() or 2)
-    limit = max(1, min(4, (cores - 1) // 2 or 1))
+    limit = (max(1, cores - 1) if profile == 'max' else
+             max(1, min(4, (cores - 1) // 2 or 1)))
     for key in ('OPENBLAS_NUM_THREADS', 'OMP_NUM_THREADS', 'MKL_NUM_THREADS'):
         try:
             existing = int(os.environ.get(key, limit))
         except ValueError:
             existing = limit
-        os.environ[key] = str(max(1, min(existing, limit)))
+        os.environ[key] = str(limit if profile == 'max' else max(1, min(existing, limit)))
 
 
-def ensure_numpy():
-    _limit_numpy_threads()
+def ensure_numpy(profile=None):
+    _limit_numpy_threads(profile)
     try:
         import numpy as np
         return np
@@ -1396,7 +1405,7 @@ def train_student(db, np, rows, max_steps=2000, print_every=100,
     Transformer forward/backward/Adam math runs on NVIDIA CUDA.
     NumPy remains the reliable fallback and no downloads occur here.
     """
-    cpu_np = ensure_numpy()
+    cpu_np = ensure_numpy(resource_profile)
     governor = AdaptiveResources(resource_profile)
     xp = governor.choose_backend(device) or cpu_np
     gpu = xp is not cpu_np
