@@ -413,8 +413,10 @@ class AdaptiveResources:
                         raise RuntimeError(f'GPU already {use}% busy')
             cp.asarray([1.0], dtype=cp.float32)
             return cp
-        except (ImportError, RuntimeError, ValueError, OSError,
-                subprocess.TimeoutExpired) as exc:
+        except Exception as exc:
+            # CuPy can raise a driver-specific CUDA exception even before
+            # training starts; a missing/incompatible GPU must never crash
+            # the NumPy fallback path.
             if requested == 'gpu':
                 say(f'CUDA unavailable or busy ({exc}); safely using NumPy CPU.')
             return None
