@@ -2089,7 +2089,7 @@ def agent_dialogue(db, teacher, turns=8, topic=None, display=True):
     return str(sessions),pairs*2
 
 
-def learn_observations(db, np, steps=250, epochs=25):
+def learn_observations(db, np, steps=250, epochs=25, device='auto', resource_profile='balanced'):
     """Train real next-token gradients using balanced conversational data.
 
     A small number of explicitly taught examples must not disappear inside
@@ -2142,7 +2142,8 @@ def learn_observations(db, np, steps=250, epochs=25):
             yield rng.choice(selected)
 
     return train_student(
-        db, np, training_rows(), max_steps=max(1, int(steps)), print_every=25
+        db, np, training_rows(), max_steps=max(1, int(steps)), print_every=25,
+        device=device, resource_profile=resource_profile
     )
 
 
@@ -2154,7 +2155,10 @@ def main():
     parser.add_argument('--topic',type=str,default=None,help='one practical human question topic for all chats')
     parser.add_argument('--forever',dest='forever',action='store_true',default=True,help='continue until Ctrl+C (default)')
     parser.add_argument('--once',dest='forever',action='store_false',help='only one cycle')
-    parser.add_argument('--shared-model',action='store_true',help='use one local Qwen server for both roles (less memory, not separate processes)')
+    parser.add_argument('--shared-model',action='store_true',default=True,help='share one local teacher process for all agent roles (default)')
+    parser.add_argument('--helpers',type=int,choices=(2,3),default=3,help='optional local teacher roles: human+answerer+reviewer (3 default)')
+    parser.add_argument('--device',choices=('auto','cpu','gpu'),default='auto',help='auto-select idle CUDA/CuPy or NumPy CPU (default auto)')
+    parser.add_argument('--profile',choices=('balanced','quiet'),default='balanced',help='adaptive CPU/RAM resource policy; quiet yields even more often')
     parser.add_argument('--offline',action='store_true',default=True,help='AXON-only training from saved examples (default)')
     parser.add_argument('--teacher',action='store_true',help='optional: generate extra training data with a separate local teacher model')
     parser.add_argument('--corpus-examples',type=int,default=0,help='extra synthetic corpus rows (default: 0)')
@@ -2173,7 +2177,7 @@ def main():
     say(f'{len(ALL_SCENARIOS):,} learning categories, {len(STYLE_MODES)} speaking styles; Ctrl+C to stop.')
     say(f'Student: {PARAMETERS:,}-parameter causal Transformer ({TRANSFORMER_LAYERS} layers, {TRANSFORMER_HEADS} heads). Maximum BRAIN.db: 5 GiB.')
     if args.teacher:
-        say('Optional teacher-data mode enabled; chat responses still come only from AXON.')
+        say('Optional local training helpers: distinct conversational roles on one shared teacher model; chat stays AXON-only.')
     else:
         say('AXON-only mode: no external model is downloaded or used.')
     np=ensure_numpy()
@@ -2199,7 +2203,10 @@ def main():
                     f'AXON offline training cycle {cycle:,}: '
                     f'{args.steps:,} gradient batches | Ctrl+C safely saves weights'
                 )
-                learn_observations(db, np, steps=args.steps)
+                learn_observations(
+                    db, np, steps=args.steps,
+                    device=args.device, resource_profile=args.profile
+                )
                 say(
                     f'Checkpoint: {int(get_meta(db, "transformer_steps", 0)):,} total batches '
                     f'| validation loss {get_meta(db, "transformer_validation_loss", "n/a")} '
@@ -2208,31 +2215,60 @@ def main():
                 if not args.forever:
                     break
         else:
-            model=ensure_teacher(db)
-            def training_loop(human_model,assistant_model):
+            # One local small teacher model plays distinct Human, Answerer
+            # and Reviewer roles. This is role-based cooperation, not three
+            # copies of the model in RAM and not a source for chat responses.
+            resources = AdaptiveResources(args.profile)
+            resources.sample(force=True)
+            available_gb = (resources.ram_available or 0) / 1024**3
+            requested = min(args.chats, max(1, resources.cores // 3))
+            if (resources.cpu_percent is not None and resources.cpu_percent >= 75) or (
+                resources.ram_available is not None and available_gb < 3
+            ):
+                active_chats = 1
+                active_helpers = 2
+            else:
+                active_chats = max(1, requested)
+                active_helpers = args.helpers
+            say(
+                f'Local helper roles: {active_helpers} | '
+                f'concurrent conversations: {active_chats}/{args.chats} | '
+                'one shared teacher process to protect RAM.'
+            )
+            model = ensure_teacher(db)
+            def training_loop(human_model,assistant_model,reviewer_model):
                 while True:
+                    resources.throttle()
                     sessions,pairs=agent_dialogues_parallel(
-                        db,human_model,assistant_model,chats=args.chats,turns=args.rounds,topic=args.topic)
+                        db,human_model,assistant_model,
+                        chats=active_chats,turns=args.rounds,topic=args.topic,
+                        reviewer_model=reviewer_model
+                    )
                     if pairs:
                         say(f'\nAXON training from {pairs} new human-to-assistant answers...')
-                        learn_observations(db,np,steps=args.steps)
+                        learn_observations(
+                            db,np,steps=args.steps,
+                            device=args.device,resource_profile=args.profile
+                        )
                     else:
                         say('No valid answers generated, so no training occurred this cycle.')
                     enforce_db_size(db)
                     say(f'BRAIN.db: {DB_PATH.stat().st_size/1024**2:.1f} MiB / 5120 MiB.')
                     if not args.forever:break
-            with Teacher(model,parallel=args.chats,role='Human') as human_model:
-                if args.shared_model:
-                    training_loop(human_model,human_model)
-                else:
-                    with Teacher(model,parallel=args.chats,role='Assistant') as assistant_model:
-                        training_loop(human_model,assistant_model)
+            with Teacher(model,parallel=active_chats,role='Human+Answerer+Reviewer') as local_helpers:
+                training_loop(
+                    local_helpers, local_helpers,
+                    local_helpers if active_helpers >= 3 else None
+                )
         if args.all or args.corpus_examples>0:
             if not DATA_PATH.is_file():say('No training_data.txt found; skipped corpus stage.')
             else:
                 say('Extra synthetic math/programming corpus stage...')
-                train_student(db,np,example_lines(None if args.all else max(0,args.corpus_examples)),
-                              max_steps=None if args.all else max(1,args.steps))
+                train_student(
+                    db,np,example_lines(None if args.all else max(0,args.corpus_examples)),
+                    max_steps=None if args.all else max(1,args.steps),
+                    device=args.device,resource_profile=args.profile
+                )
         say('Done. Run LLM Chat.py to interact with AXON student word-by-word.')
         say('More learning: python "LLM Train.py" --steps 1200')
         say('Optional external data generation only: python "LLM Train.py" --teacher --chats 4 --rounds 8')
