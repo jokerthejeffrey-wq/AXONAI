@@ -67,12 +67,12 @@ def show_stats(db, vocab):
     print(f"Context: {core.TRANSFORMER_CONTEXT} BPE tokens | output budget {core.MAX_GENERATION_TOKENS}")
     print(f"Tokenizer: {len(vocab):,} tokens | {merges:,} learned BPE merges")
     print(f"Training batches: {step:,} | validation loss: {validation}")
-    print(f"BRAIN.db: {core.DB_PATH.stat().st_size / 1024**2:.1f} MiB / 15360 MiB")
+    print(f"BRAIN.db: {core.DB_PATH.stat().st_size / 1024**2:.1f} MiB / 5120 MiB")
     print(
         f"Neural lookahead: {core.GENERATION_LOOKAHEAD_BRANCHES} branches, "
         f"one speculative token each; minimum word-display interval 0.5 seconds."
     )
-    print("No saved-answer retrieval, no canned greeting system, no external chat model.")
+    print("No answer retrieval; CUDA if installed and free, otherwise adaptive NumPy CPU training.")
 
 
 def main():
