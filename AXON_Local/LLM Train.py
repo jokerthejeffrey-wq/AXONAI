@@ -2158,7 +2158,9 @@ def learn_observations(db, np, steps=250, epochs=25, device='auto', resource_pro
             yield rng.choice(selected)
 
     return train_student(
-        db, np, training_rows(), max_steps=max(1, int(steps)), print_every=25,
+        db, np, training_rows(),
+        max_steps=None if steps is None else max(1, int(steps)),
+        print_every=100 if steps is None or resource_profile == 'max' else 25,
         device=device, resource_profile=resource_profile
     )
 
@@ -2213,18 +2215,45 @@ def restart_with_supported_python():
     )
 
 
+def parse_training_steps(value):
+    """An integer batch count or an explicitly unbounded training run."""
+    text = str(value).strip().lower()
+    if text in ('inf', 'infinite', 'unlimited', 'forever'):
+        return None
+    try:
+        number = int(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            '--steps must be a positive integer or inf'
+        ) from exc
+    if number < 1:
+        raise argparse.ArgumentTypeError(
+            '--steps must be a positive integer or inf'
+        )
+    return number
+
+
 def main():
+    global AXON_PERFORMANCE_PROFILE, TRANSFORMER_BATCH
     parser=argparse.ArgumentParser(description='Parallel human/assistant conversations train AXON locally')
     parser.add_argument('--chats',type=int,default=4,help='simultaneous human/assistant chats (default: 4, max: 12)')
     parser.add_argument('--rounds',type=int,default=8,help='messages PER chat; even number, default: 8 (4 Q&A pairs)')
-    parser.add_argument('--steps',type=int,default=400,help='causal Transformer Adam batches per cycle (default: 400)')
+    parser.add_argument('--steps',type=parse_training_steps,default=400,
+                        help='positive batches per cycle or inf (unbounded, Ctrl+C to stop)')
+    parser.add_argument('--infinite',action='store_true',
+                        help='train continuously without a batch limit (equivalent to --steps inf)')
+    parser.add_argument('--max-usage',action='store_true',
+                        help='maximum available CPU/GPU throughput; disables normal CPU throttling')
+    parser.add_argument('--batch-size',type=int,default=None,
+                        help='examples per gradient batch (2 to 16; auto-scaled in max-usage mode)')
     parser.add_argument('--topic',type=str,default=None,help='one practical human question topic for all chats')
     parser.add_argument('--forever',dest='forever',action='store_true',default=True,help='continue until Ctrl+C (default)')
     parser.add_argument('--once',dest='forever',action='store_false',help='only one cycle')
     parser.add_argument('--shared-model',action='store_true',default=True,help='share one local teacher process for all agent roles (default)')
     parser.add_argument('--helpers',type=int,choices=(2,3),default=3,help='optional local teacher roles: human+answerer+reviewer (3 default)')
     parser.add_argument('--device',choices=('auto','cpu','gpu'),default='auto',help='auto-select idle CUDA/CuPy or NumPy CPU (default auto)')
-    parser.add_argument('--profile',choices=('balanced','quiet'),default='balanced',help='adaptive CPU/RAM resource policy; quiet yields even more often')
+    parser.add_argument('--profile',choices=('balanced','quiet','max'),default='balanced',
+                        help='balanced, quiet, or max (high CPU/GPU usage; potential PC lag)')
     parser.add_argument('--offline',action='store_true',default=True,help='AXON-only training from saved examples (default)')
     parser.add_argument('--teacher',action='store_true',help='optional: generate extra training data with a separate local teacher model')
     parser.add_argument('--corpus-examples',type=int,default=0,help='extra synthetic corpus rows (default: 0)')
@@ -2233,13 +2262,36 @@ def main():
     parser.add_argument('--examples',type=int,default=None,help='legacy alias for --corpus-examples')
     args=parser.parse_args()
     if args.teacher:args.offline=False
+    if args.max_usage: args.profile='max'
+    if args.infinite: args.steps=None
+    if args.steps is None:
+        if not args.forever:
+            parser.error('--once cannot be combined with --steps inf or --infinite')
+        args.forever=True
+    if args.batch_size is not None and not (2 <= args.batch_size <= 16):
+        parser.error('--batch-size must be between 2 and 16')
+    AXON_PERFORMANCE_PROFILE=args.profile
+    TRANSFORMER_BATCH=(
+        args.batch_size if args.batch_size is not None else
+        (max(2, min(8, (os.cpu_count() or 4)//2)) if args.profile=='max' else 2)
+    )
     if args.distill is not None:args.rounds=args.distill
     if args.examples is not None:args.corpus_examples=args.examples
     if not 1<=args.chats<=12:parser.error('--chats must be between 1 and 12')
     if not 2<=args.rounds<=200:parser.error('--rounds must be between 2 and 200')
-    if args.steps<1:parser.error('--steps must be at least 1')
     restart_with_supported_python()
     say('AXON AI | standalone NumPy autoregressive Transformer training')
+    step_mode='INFINITE' if args.steps is None else f'{args.steps:,} per cycle'
+    say(
+        f'Training: {step_mode} gradient batches | profile {args.profile.upper()} | '
+        f'gradient batch size {TRANSFORMER_BATCH} | device {args.device.upper()}'
+    )
+    if args.profile == 'max':
+        say(
+            'MAX USAGE ENABLED: CPU/GPU can run near full load. '
+            'The PC may lag; 512 MiB free-RAM safety reserve and the 5 GB '
+            'database cap remain. Press Ctrl+C to checkpoint and stop.'
+        )
     say(f'{len(ALL_SCENARIOS):,} learning categories, {len(STYLE_MODES)} speaking styles; Ctrl+C to stop.')
     say(f'Student: {PARAMETERS:,}-parameter causal Transformer ({TRANSFORMER_LAYERS} layers, {TRANSFORMER_HEADS} heads). Maximum BRAIN.db: 5 GB.')
     if args.teacher:
@@ -2267,9 +2319,10 @@ def main():
             worsening_cycles = 0
             while True:
                 cycle += 1
+                step_label = 'UNLIMITED' if args.steps is None else f'{args.steps:,}'
                 say(
                     f'AXON offline training cycle {cycle:,}: '
-                    f'{args.steps:,} gradient batches | Ctrl+C safely saves weights'
+                    f'{step_label} gradient batches | Ctrl+C safely saves weights'
                 )
                 learn_observations(
                     db, np, steps=args.steps,
@@ -2298,7 +2351,7 @@ def main():
                         worsening_cycles = 0
                     elif val > best_validation + 0.15:
                         worsening_cycles += 1
-                    if worsening_cycles >= 3:
+                    if worsening_cycles >= 3 and args.profile != 'max':
                         say(
                             'Auto-stopped after three degrading validation cycles '
                             'to protect the model from further memorization. '
@@ -2341,14 +2394,20 @@ def main():
                     )
                     if pairs:
                         say(f'\nAXON training from {pairs} new human-to-assistant answers...')
+                        # In endless teacher mode, alternate fresh data generation
+                        # with finite optimization bursts; an infinite single burst
+                        # would prevent the helper AIs from generating more lessons.
                         learn_observations(
-                            db,np,steps=args.steps,
+                            db,np,steps=400 if args.steps is None else args.steps,
                             device=args.device,resource_profile=args.profile
                         )
                     else:
                         say('No valid answers generated, so no training occurred this cycle.')
                     enforce_db_size(db)
-                    say(f'BRAIN.db: {DB_PATH.stat().st_size/1024**2:.1f} MiB / 5120 MiB.')
+                    say(
+                        f'BRAIN.db: {DB_PATH.stat().st_size / 1e9:.3f} GB / '
+                        f'{MAX_DB_BYTES / 1e9:.3f} GB.'
+                    )
                     if not args.forever:break
             with Teacher(
                 model,parallel=active_chats,role='Human+Answerer+Reviewer',
@@ -2364,7 +2423,7 @@ def main():
                 say('Extra synthetic math/programming corpus stage...')
                 train_student(
                     db,np,example_lines(None if args.all else max(0,args.corpus_examples)),
-                    max_steps=None if args.all else max(1,args.steps),
+                    max_steps=None if args.all or args.steps is None else max(1,args.steps),
                     device=args.device,resource_profile=args.profile
                 )
         say('Done. Run LLM Chat.py to interact with AXON student word-by-word.')
