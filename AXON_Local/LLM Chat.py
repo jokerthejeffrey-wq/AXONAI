@@ -49,7 +49,7 @@ class WordStreamPrinter:
             self.pending = ""
 
 
-CHAT_MAX_NEW_TOKENS = 160
+CHAT_MAX_NEW_TOKENS = 96
 
 
 def show_stats(db, vocab):
@@ -67,7 +67,7 @@ def show_stats(db, vocab):
     print(f"Tokenizer: {len(vocab):,} tokens | {merges:,} learned BPE merges")
     print(f"Training batches: {step:,} | validation loss: {validation}")
     print(f"BRAIN.db: {core.DB_PATH.stat().st_size / 1_000_000_000:.2f} GB / {core.MAX_DB_BYTES / 1_000_000_000:.2f} GB")
-    print("Neural generation: 2 or 3 full-context passes per token (select :think 2 or :think 3).")
+    print("Neural generation: 1 direct pass by default; experimental 2/3-pass lookahead is optional.")
     print("Text streams per complete word with no artificial waiting.")
     print("No answer retrieval; CUDA if installed and free, otherwise adaptive NumPy CPU training.")
 
@@ -81,8 +81,8 @@ def main():
     )
     print("Every response is generated token by token by AXON itself.")
     print(
-        "AXON checks each next-token choice twice by default; :think 3 "
-        "adds a third continuation pass."
+        "AXON uses direct learned next-token probabilities by default. "
+        "Extra :think 2/3 passes are experimental."
     )
     print("Words stream immediately when decoded; no artificial delays.")
     print("Type :help for commands.")
@@ -91,7 +91,7 @@ def main():
         core.bootstrap_lessons(db)
         vocab = core.build_vocabulary(db)
         history = []
-        think_passes = 2
+        think_passes = 1
         trained_steps = int(core.get_meta(db, "transformer_steps", 0))
         if trained_steps:
             print(f"Loaded AXON checkpoint ({trained_steps:,} training batches).")
@@ -126,18 +126,21 @@ def main():
                 print("  :teach question => answer   Train AXON on your example")
                 print("  :train 1200                 Train on saved examples")
                 print("  :stats                      Show model and training details")
-                print("  :think 2                    Two neural passes per next token (faster)")
-                print("  :think 3                    Three neural passes per next token (slower)")
+                print("  :think 1                    Direct learned probabilities (recommended)")
+                print("  :think 2                    Experimental 2-pass search")
+                print("  :think 3                    Experimental 3-pass search (slower)")
                 print("  :new                        Clear the current conversation context")
                 print("  :exit                       Quit")
                 print(f"Current think passes: {think_passes}; streaming whole words without delay.")
                 continue
             if lower == ":think":
-                print(f"Current AXON think passes: {think_passes}. Use :think 2 or :think 3.")
+                print(f"Current AXON think passes: {think_passes}. Use :think 1, :think 2 or :think 3.")
                 continue
-            if lower in (":think 2", ":think 3"):
+            if lower in (":think 1", ":think 2", ":think 3"):
                 think_passes = int(lower.split()[1])
-                print(f"AXON will evaluate every next-token choice {think_passes} times.")
+                print(f"AXON neural inference passes per token: {think_passes}. " +
+                      ("Direct trained distribution." if think_passes == 1 else
+                       "Experimental lookahead; may worsen coherence."))
                 continue
             if lower == ":stats":
                 vocab = core.build_vocabulary(db)
