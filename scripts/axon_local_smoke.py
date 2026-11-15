@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import contextlib
 import io
+import inspect
 import runpy
 import time
 import itertools
@@ -67,6 +68,26 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert after < before, "AXON optimizer failed to reduce next-token error"
         assert int(core.get_meta(db, "transformer_steps", 0)) >= 8
 
+        # Exercise the alternative accelerator code path without requiring a
+        # CUDA GPU on GitHub's normal hosted CI runner.
+        class SimulatedArrayBackend:
+            def __getattr__(self, name):
+                return getattr(np, name)
+
+        original_choose = core.AdaptiveResources.choose_backend
+        core.AdaptiveResources.choose_backend = (
+            lambda self, device="auto": SimulatedArrayBackend()
+        )
+        try:
+            simulated = core.train_student(
+                db, np, itertools.cycle(examples), max_steps=2,
+                print_every=2, device="gpu"
+            )
+        finally:
+            core.AdaptiveResources.choose_backend = original_choose
+        assert simulated == 2, "Alternative array backend path failed"
+        print("Simulated GPU-backend training, optimizer and checkpoint: PASS")
+
         pieces = []
         original_forward = core.transformer_forward
         forward_calls = [0]
@@ -110,4 +131,6 @@ assert "retrieve_learned_reply" not in CHAT
 assert "learned_greeting_examples" not in CHAT
 assert "transformer_generate" in CHAT
 assert "Teacher(" not in MANUAL
+assert "reviewer_model" in inspect.signature(core._chat_worker).parameters
+assert "reviewer_model" in inspect.signature(core.agent_dialogues_parallel).parameters
 print("PASS: 5 GiB SQLite cap, adaptive CPU fallback, decreasing loss, neural lookahead, word pacing.")
