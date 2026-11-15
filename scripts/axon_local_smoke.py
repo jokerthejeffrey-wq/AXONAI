@@ -30,15 +30,15 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         # SQLite-level enforcement is stronger than checking file size in Python.
         page_size = db.execute("PRAGMA page_size").fetchone()[0]
         page_cap = db.execute("PRAGMA max_page_count").fetchone()[0]
-        assert core.MAX_DB_BYTES == 5 * 1024**3
+        assert core.MAX_DB_BYTES == 5_000_000_000
         assert page_cap == core.MAX_DB_BYTES // page_size
         try:
             core.enforce_db_size(db, core.MAX_DB_BYTES)
         except RuntimeError as exc:
-            assert "5 GiB" in str(exc)
+            assert "5 GB" in str(exc)
         else:
-            raise AssertionError("5 GiB database limit is not enforced")
-        print(f"SQLite BRAIN.db cap: {page_cap * page_size / 1024**3:.2f} GiB")
+            raise AssertionError("5 GB database limit is not enforced")
+        print(f"SQLite BRAIN.db cap: {page_cap * page_size / 1_000_000_000:.3f} GB")
         governor = core.AdaptiveResources()
         assert governor.workers <= 4
         assert governor.choose_backend("cpu") is None
@@ -133,4 +133,4 @@ assert "transformer_generate" in CHAT
 assert "Teacher(" not in MANUAL
 assert "reviewer_model" in inspect.signature(core._chat_worker).parameters
 assert "reviewer_model" in inspect.signature(core.agent_dialogues_parallel).parameters
-print("PASS: 5 GiB SQLite cap, adaptive CPU fallback, decreasing loss, neural lookahead, word pacing.")
+print("PASS: 5 GB SQLite cap, adaptive CPU fallback, decreasing loss, neural lookahead, word pacing.")
