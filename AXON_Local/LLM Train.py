@@ -1113,6 +1113,68 @@ def save_transformer(db, np, params, moment1, moment2, step):
     db.commit()
 
 
+def save_best_validation_checkpoint(db, loss, step):
+    """Keep a separate copy of the best neural weights in BRAIN.db.
+
+    Does not modify the current checkpoint or training optimizer state.
+    Old weights and user lessons remain intact.
+    """
+    if loss is None or not math.isfinite(float(loss)):
+        return False
+    old = get_meta(db, 'transformer_best_validation_loss')
+    best_version = get_meta(db, 'transformer_best_version')
+    if old is not None and best_version == TRANSFORMER_VERSION:
+        try:
+            if float(loss) >= float(old) - 0.02:
+                return False
+        except ValueError:
+            pass
+
+    current = db.execute(
+        "SELECT COUNT(*), COALESCE(SUM(LENGTH(value)), 0) "
+        "FROM weights WHERE key LIKE 'trf_p_%'"
+    ).fetchone()
+    if current[0] != len(_trf_parameter_names()):
+        return False
+    try:
+        # SQLite's max_page_count also enforces the hard 5 GB cap.
+        enforce_db_size(db, int(current[1]) + 2 * 1024**2)
+    except RuntimeError:
+        say('Best-checkpoint snapshot skipped: BRAIN.db storage limit.')
+        return False
+
+    db.execute('SAVEPOINT axon_best_validation')
+    try:
+        for name in _trf_parameter_names():
+            db.execute(
+                "INSERT OR REPLACE INTO weights(key,value) "
+                "SELECT ?,value FROM weights WHERE key=?",
+                ('trf_best_p_' + name, 'trf_p_' + name)
+            )
+        set_meta(db, 'transformer_best_validation_loss', f'{float(loss):.6f}')
+        set_meta(db, 'transformer_best_step', str(step))
+        set_meta(db, 'transformer_best_version', TRANSFORMER_VERSION)
+        db.execute('RELEASE SAVEPOINT axon_best_validation')
+        db.commit()
+    except Exception:
+        db.execute('ROLLBACK TO SAVEPOINT axon_best_validation')
+        db.execute('RELEASE SAVEPOINT axon_best_validation')
+        db.rollback()
+        raise
+    say(f'Best neural checkpoint saved: validation {loss:.3f} | step {step:,}')
+    return True
+
+
+def best_checkpoint_available(db):
+    """Only use complete, architecture-compatible saved neural weights."""
+    if get_meta(db, 'transformer_best_version') != TRANSFORMER_VERSION:
+        return False
+    count = db.execute(
+        "SELECT COUNT(*) FROM weights WHERE key LIKE 'trf_best_p_%'"
+    ).fetchone()[0]
+    return count == len(_trf_parameter_names())
+
+
 def load_transformer(db, np, vocab=None):
     """Load the causal Transformer; initialize it once if no compatible checkpoint exists."""
     vocab = vocab or build_vocabulary(db)
