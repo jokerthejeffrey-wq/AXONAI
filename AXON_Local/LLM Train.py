@@ -1740,65 +1740,70 @@ def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
         probabilities = probabilities[nucleus]
         probabilities /= probabilities.sum()
 
-        # AXON's own neural next-token search; NO canned answers or teacher AI.
-        # Two candidates (previously four) reduce the expensive full-context
-        # reevaluation and improve responsiveness, while retaining lookahead.
-        branch_count = min(GENERATION_LOOKAHEAD_BRANCHES, len(candidates))
-        branch_ids = candidates[:branch_count]
-        branch_contexts = np.asarray([
-            (context_tokens + [int(token_id)])[-TRANSFORMER_CONTEXT:]
-            for token_id in branch_ids
-        ], dtype=np.int32)
-
-        # Pass 2: condition the Transformer on the FULL question, conversation
-        # and candidate next tokens to evaluate plausible continuations.
-        future_logits, _ = transformer_forward(np, params, branch_contexts)
-        future_scores = future_logits[:, -1, :len(vocab)].astype('float64')
-        future_scores[:, 0:2] = -1e9
-        future_scores[:, 3:5] = -1e9
-        if step < 7:
-            future_scores[:, 2] = -1e9
-
-        def predictability(scores):
-            scaled = scores / temperature
-            shifted = scaled - scaled.max(axis=1, keepdims=True)
-            return -np.log(np.maximum(
-                np.exp(np.clip(shifted, -80.0, 0.0)).sum(axis=1),
-                1e-12
-            ))
-
-        # The primary next-token probability is most important. Lookahead
-        # contributes a smaller score reflecting likely continuation.
-        branch_log_weight = (
-            np.log(np.maximum(probabilities[:branch_count], 1e-12))
-            + GENERATION_LOOKAHEAD_WEIGHT * predictability(future_scores)
-        )
-
-        if think_passes == 3:
-            # Pass 3: examine the best predicted token AFTER each speculative
-            # continuation. Optional: another full model pass per output token.
-            next_ids = np.argmax(future_scores, axis=1)
-            second_contexts = np.asarray([
-                (context_tokens + [int(first), int(second)])[
-                    -TRANSFORMER_CONTEXT:
-                ]
-                for first, second in zip(branch_ids, next_ids)
+        if think_passes == 1:
+            # Directly sample learned next-token probabilities, without the
+            # experimental lookahead scoring that degraded user responses.
+            choice = int(rng.choice(candidates, p=probabilities))
+        else:
+            # AXON's own neural next-token search; NO canned answers or teacher AI.
+            # Two candidates (previously four) reduce the expensive full-context
+            # reevaluation and improve responsiveness, while retaining lookahead.
+            branch_count = min(GENERATION_LOOKAHEAD_BRANCHES, len(candidates))
+            branch_ids = candidates[:branch_count]
+            branch_contexts = np.asarray([
+                (context_tokens + [int(token_id)])[-TRANSFORMER_CONTEXT:]
+                for token_id in branch_ids
             ], dtype=np.int32)
-            third_logits, _ = transformer_forward(np, params, second_contexts)
-            third_scores = third_logits[:, -1, :len(vocab)].astype(
-                'float64'
-            )
-            third_scores[:, 0:2] = -1e9
-            third_scores[:, 3:5] = -1e9
-            branch_log_weight += (
-                GENERATION_LOOKAHEAD_WEIGHT * 0.5
-                * predictability(third_scores)
+
+            # Pass 2: condition the Transformer on the FULL question, conversation
+            # and candidate next tokens to evaluate plausible continuations.
+            future_logits, _ = transformer_forward(np, params, branch_contexts)
+            future_scores = future_logits[:, -1, :len(vocab)].astype('float64')
+            future_scores[:, 0:2] = -1e9
+            future_scores[:, 3:5] = -1e9
+            if step < 7:
+                future_scores[:, 2] = -1e9
+
+            def predictability(scores):
+                scaled = scores / temperature
+                shifted = scaled - scaled.max(axis=1, keepdims=True)
+                return -np.log(np.maximum(
+                    np.exp(np.clip(shifted, -80.0, 0.0)).sum(axis=1),
+                    1e-12
+                ))
+
+            # The primary next-token probability is most important. Lookahead
+            # contributes a smaller score reflecting likely continuation.
+            branch_log_weight = (
+                np.log(np.maximum(probabilities[:branch_count], 1e-12))
+                + GENERATION_LOOKAHEAD_WEIGHT * predictability(future_scores)
             )
 
-        branch_log_weight -= branch_log_weight.max()
-        branch_weights = np.exp(branch_log_weight)
-        branch_weights /= np.maximum(branch_weights.sum(), 1e-12)
-        choice = int(rng.choice(branch_ids, p=branch_weights))
+            if think_passes == 3:
+                # Pass 3: examine the best predicted token AFTER each speculative
+                # continuation. Optional: another full model pass per output token.
+                next_ids = np.argmax(future_scores, axis=1)
+                second_contexts = np.asarray([
+                    (context_tokens + [int(first), int(second)])[
+                        -TRANSFORMER_CONTEXT:
+                    ]
+                    for first, second in zip(branch_ids, next_ids)
+                ], dtype=np.int32)
+                third_logits, _ = transformer_forward(np, params, second_contexts)
+                third_scores = third_logits[:, -1, :len(vocab)].astype(
+                    'float64'
+                )
+                third_scores[:, 0:2] = -1e9
+                third_scores[:, 3:5] = -1e9
+                branch_log_weight += (
+                    GENERATION_LOOKAHEAD_WEIGHT * 0.5
+                    * predictability(third_scores)
+                )
+
+            branch_log_weight -= branch_log_weight.max()
+            branch_weights = np.exp(branch_log_weight)
+            branch_weights /= np.maximum(branch_weights.sum(), 1e-12)
+            choice = int(rng.choice(branch_ids, p=branch_weights))
         if choice == 2:
             break
 
