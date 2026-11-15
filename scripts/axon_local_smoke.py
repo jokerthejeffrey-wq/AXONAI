@@ -281,8 +281,18 @@ print(f"Immediate word stream: {first - start:.3f}s, "
 # was missing. Simulate that exact older-trainer situation.
 from unittest.mock import patch
 chat_core = chat_module["core"]
-chat_core.DB_PATH = core.DB_PATH
-chat_core.DATA_PATH = core.DATA_PATH
+# The preceding model smoke test's temporary directory has already been
+# cleaned up; create a fresh local database for the chat startup regression.
+compat_temp = tempfile.TemporaryDirectory(prefix='axon-legacy-chat-')
+chat_core.DB_PATH = Path(compat_temp.name) / "BRAIN.db"
+chat_core.DATA_PATH = Path(compat_temp.name) / "training_data.txt"
+with chat_core.connection() as compat_db:
+    chat_core.bootstrap_lessons(compat_db)
+    chat_core.build_vocabulary(compat_db)
+    chat_core.set_meta(compat_db, 'transformer_steps', 41252)
+    chat_core.set_meta(compat_db, 'transformer_validation_loss', '6.44910')
+    chat_core.set_meta(compat_db, 'transformer_best_validation_loss', '5.10000')
+    compat_db.commit()
 older_selector = getattr(chat_core, 'inference_uses_best_checkpoint', None)
 older_checker = getattr(chat_core, 'best_checkpoint_available', None)
 try:
@@ -306,6 +316,7 @@ finally:
         setattr(chat_core, 'inference_uses_best_checkpoint', older_selector)
     if older_checker is not None:
         setattr(chat_core, 'best_checkpoint_available', older_checker)
+    compat_temp.cleanup()
 
 CHAT = (ROOT / "AXON_Local" / "CHAT.py").read_text(encoding="utf-8")
 MANUAL = (ROOT / "AXON_Local" / "MANUAL Chat.py").read_text(encoding="utf-8")
