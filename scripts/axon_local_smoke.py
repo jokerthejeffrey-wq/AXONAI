@@ -43,6 +43,22 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert governor.workers <= 4
         assert governor.choose_backend("cpu") is None
         print("Resource governor:", governor.describe())
+
+        # Explicit maximum-performance mode should not sleep just because
+        # CPU utilization is high. It still keeps a low-memory safety pause.
+        max_governor = core.AdaptiveResources("max")
+        assert max_governor.workers >= governor.workers
+        assert max_governor.choose_backend("cpu") is None
+        max_governor.cpu_percent = 99.0
+        max_governor.ram_available = 4 * 1024**3
+        max_governor.sample = lambda force=False: None
+        start = time.monotonic()
+        max_governor.throttle()
+        assert time.monotonic() - start < 0.3, "Max mode unexpectedly throttled"
+        assert core.parse_training_steps("inf") is None
+        assert core.parse_training_steps("infinite") is None
+        assert core.parse_training_steps("99999") == 99999
+        print("Unlimited steps and maximum-use resource profile: PASS")
         core.bootstrap_lessons(db)
         vocab = core.build_vocabulary(db)
         assert len(vocab) > len(core.SPECIAL)
@@ -67,6 +83,24 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         assert trained == 8
         assert after < before, "AXON optimizer failed to reduce next-token error"
         assert int(core.get_meta(db, "transformer_steps", 0)) >= 8
+
+        # Confirm unbounded training passes a None step cap through to the
+        # real Transformer loop without actually running indefinitely in CI.
+        original_train_student = core.train_student
+        sent = {}
+        def record_infinite_training(*args, **kwargs):
+            sent.update(kwargs)
+            return 1
+        core.train_student = record_infinite_training
+        try:
+            assert core.learn_observations(
+                db, np, steps=None, device="cpu", resource_profile="max"
+            ) == 1
+        finally:
+            core.train_student = original_train_student
+        assert sent.get("max_steps") is None
+        assert sent.get("resource_profile") == "max"
+        print("Infinite training stream forwards no step limit: PASS")
 
         # Exercise the alternative accelerator code path without requiring a
         # CUDA GPU on GitHub's normal hosted CI runner.
@@ -133,4 +167,4 @@ assert "transformer_generate" in CHAT
 assert "Teacher(" not in MANUAL
 assert "reviewer_model" in inspect.signature(core._chat_worker).parameters
 assert "reviewer_model" in inspect.signature(core.agent_dialogues_parallel).parameters
-print("PASS: 5 GB SQLite cap, adaptive CPU fallback, decreasing loss, neural lookahead, word pacing.")
+print("PASS: max profile, infinite training, 5 GB cap, CPU/GPU paths, decreasing loss, lookahead and pacing.")
