@@ -522,6 +522,14 @@ def ensure_teacher(db):
     CACHE.mkdir(parents=True, exist_ok=True)
     if cached_valid(db):
         return GGUF
+    # A locally cached teacher is acceptable without another copy in SQLite.
+    if GGUF.is_file() and GGUF.stat().st_size <= MAX_MODEL_BYTES:
+        digest = hashlib.sha256()
+        with GGUF.open('rb') as saved:
+            for block in iter(lambda: saved.read(4 * 1024 * 1024), b''):
+                digest.update(block)
+        if digest.hexdigest() == TEACHER_SHA:
+            return GGUF
     row = db.execute('SELECT rowid,bytes,sha256 FROM models WHERE name=?', ('teacher',)).fetchone()
     if row and row[2] == TEACHER_SHA:
         say('Restoring teacher from BRAIN.db to system cache...')
@@ -546,7 +554,12 @@ def ensure_teacher(db):
     if sha.hexdigest() != TEACHER_SHA:
         GGUF.unlink(missing_ok=True)
         raise RuntimeError('Downloaded GGUF SHA256 mismatch. Check internet connection and retry.')
-    write_model_to_db(db,GGUF)
+    # Do not duplicate this ~0.5 GiB teacher in BRAIN.db under the 5 GiB cap.
+    # The separate local cache is reused. Existing stored teacher blobs stay
+    # untouched for users who already have them.
+    set_meta(db, 'teacher_cache_sha', TEACHER_SHA)
+    db.commit()
+    say('Optional local teacher stays in the cache; BRAIN.db only stores AXON learning.')
     return GGUF
 
 
@@ -626,7 +639,7 @@ class Teacher:
         self.log = tempfile.TemporaryFile(mode='w+b')
         args=[str(exe), '-m',str(self.model),'--host','127.0.0.1','--port',str(self.port),
               '-c',str(self.parallel*2048),'-np',str(self.parallel),'-cb',
-              '-t',str(min(8,max(2,(os.cpu_count() or 4)-1))),'-ngl','0']
+              '-t',str(max(1,min(4,(os.cpu_count() or 4)//2))),'-ngl','0']
         say(f'Starting local {self.role} model (CPU, {self.parallel} parallel slots)...')
         self.proc=subprocess.Popen(args,stdout=self.log,stderr=subprocess.STDOUT,cwd=str(exe.parent))
         limit=time.monotonic()+150
@@ -1901,7 +1914,8 @@ def _pair_quality(human,answer,history):
     return True,'ok'
 
 
-def _chat_worker(human_model, assistant_model, turns, scenario, first_style, session, notes_queue=None):
+def _chat_worker(human_model, assistant_model, turns, scenario, first_style, session,
+                 notes_queue=None, reviewer_model=None):
     # scenario is (topic, question objectives), NOT a vague prompt to improvise.
     goal, targets=scenario
     history=[]
@@ -1966,6 +1980,26 @@ def _chat_worker(human_model, assistant_model, turns, scenario, first_style, ses
             candidate=_clean_message(raw,'Assistant')
             valid,reason=_pair_quality(human,candidate,pairs) if candidate else (False,'empty')
             if valid:
+                if reviewer_model is not None:
+                    review_messages = [
+                        {'role':'system','content':
+                         'You are an independent answer quality reviewer. '
+                         'Check whether the assistant answer directly addresses '
+                         'the human question and is not obviously incorrect or off-topic. '
+                         'Respond only ACCEPT or REJECT.'},
+                        {'role':'user','content':
+                         'Question: ' + human + '\nCandidate answer: ' + candidate}
+                    ]
+                    try:
+                        verdict = reviewer_model.complete(
+                            review_messages, max_tokens=12, temperature=0.0
+                        )
+                        if verdict.strip().upper().startswith('REJECT'):
+                            continue
+                    except Exception:
+                        # A failed reviewer should not destroy otherwise
+                        # validated conversations.
+                        pass
                 answer=candidate
                 break
         if not answer:
@@ -1979,7 +2013,8 @@ def _chat_worker(human_model, assistant_model, turns, scenario, first_style, ses
     return session,goal,pairs
 
 
-def agent_dialogues_parallel(db, human_model, assistant_model=None, chats=4, turns=8, topic=None, display=True):
+def agent_dialogues_parallel(db, human_model, assistant_model=None, chats=4, turns=8,
+                             topic=None, display=True, reviewer_model=None):
     """Run concurrent goal-directed human/assistant chats and filter BEFORE storage."""
     assistant_model=assistant_model or human_model
     chats=max(1,min(12,int(chats)))
@@ -2007,8 +2042,11 @@ def agent_dialogues_parallel(db, human_model, assistant_model=None, chats=4, tur
             else:
                 scenario=ALL_SCENARIOS[(seed+index)%len(ALL_SCENARIOS)]
             session=uuid.uuid4().hex[:12]
-            futures.append(pool.submit(_chat_worker,human_model,assistant_model,turns,scenario,
-                                       STYLE_MODES[(seed+index)%len(STYLE_MODES)],session,notes_queue))
+            futures.append(pool.submit(
+                _chat_worker,human_model,assistant_model,turns,scenario,
+                STYLE_MODES[(seed+index)%len(STYLE_MODES)],session,notes_queue,
+                reviewer_model
+            ))
         while True:
             try:
                 session,goal,index,human,assistant,previous,used_fallback=notes_queue.get(timeout=.3)
