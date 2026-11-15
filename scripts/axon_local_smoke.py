@@ -89,9 +89,7 @@ with tempfile.TemporaryDirectory(prefix="axon-smoke-") as folder:
         original_train_student = core.train_student
         sent = {}
         core.DATA_PATH.write_text(
-            "unique corpus question\\tunique corpus answer\\n".replace(
-                "\\\\t", "\\t"
-            ).replace("\\\\n", "\\n"),
+            "unique corpus question\tunique corpus answer\n",
             encoding="utf-8"
         )
         def record_infinite_training(*args, **kwargs):
