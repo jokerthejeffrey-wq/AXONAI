@@ -733,7 +733,7 @@ TRANSFORMER_FF = 1024
 TRANSFORMER_CONTEXT = 256
 TRANSFORMER_BATCH = 2
 MAX_GENERATION_TOKENS = 512
-GENERATION_TEMPERATURE = 0.62
+GENERATION_TEMPERATURE = 0.72
 GENERATION_TOP_K = 32
 GENERATION_TOP_P = 0.90
 GENERATION_LOOKAHEAD_BRANCHES = 2
@@ -1633,7 +1633,9 @@ def _format_piece(token, previous):
     has_space = token.startswith('▁')
     text = token[1:] if has_space else token
     if not text:
-        return ''
+        # A standalone BPE word-boundary is a real separator, not an empty
+        # token. Dropping it glued unrelated words together.
+        return ' ' if has_space and previous else ''
     if text in ('.', ',', '!', '?', ':', ';', '%', ')', ']', '}', "'", '’'):
         return text
     if text in ('(', '[', '{'):
@@ -1655,8 +1657,8 @@ def transformer_generate(db, prompt, length=MAX_GENERATION_TOKENS,
     passes remain experimental and may worsen untrained model behavior.
     """
     np = ensure_numpy()
+    # Inference must never grow the vocabulary: fresh rows have random weights.
     vocab = build_vocabulary(db)
-    vocab = extend_vocabulary(db, prompt)
     if int(get_meta(db, 'transformer_steps', 0)) <= 0:
         return '[AXON Transformer has not been trained yet. Run LLM Train.py first.]'
     params = load_inference_transformer(db, np, vocab)
